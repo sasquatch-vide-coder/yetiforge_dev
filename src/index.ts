@@ -4,6 +4,7 @@ import { createBot } from "./bot.js";
 import { SessionManager } from "./claude/session-manager.js";
 import { ProjectManager } from "./projects/project-manager.js";
 import { InvocationLogger } from "./status/invocation-logger.js";
+import { closeDatabase } from "./status/database.js";
 import { startStatusServer } from "./status/server.js";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -54,6 +55,8 @@ async function main() {
     await sessionManager.save();
     await projectManager.save();
     await agentConfig.save();
+    invocationLogger.close();
+    closeDatabase();
     logger.info("Shutdown complete");
     process.exit(0);
   };

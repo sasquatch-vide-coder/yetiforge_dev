@@ -14,6 +14,7 @@ import { Orchestrator } from "../agents/orchestrator.js";
 import { SessionManager } from "../claude/session-manager.js";
 import { InvocationLogger } from "./invocation-logger.js";
 import { WebChatStore } from "../admin/web-chat-store.js";
+import { getAllInvocations, getInvocationStats } from "./database.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -35,7 +36,7 @@ function getServiceStatus(): {
   memory: string | null;
 } {
   try {
-    const raw = execSync("systemctl show rumpbot --no-pager", {
+    const raw = execSync("systemctl show tiffbot --no-pager", {
       encoding: "utf-8",
     });
     const props: Record<string, string> = {};
@@ -144,7 +145,7 @@ async function getProjects(dataDir: string): Promise<ProjectsData> {
 function getRecentLogs(lines: number = 50): Promise<string[]> {
   return new Promise((resolve) => {
     exec(
-      `journalctl -u rumpbot --no-pager -n ${lines} --output=short-iso`,
+      `journalctl -u tiffbot --no-pager -n ${lines} --output=short-iso`,
       { encoding: "utf-8" },
       (err, stdout) => {
         if (err) {
@@ -249,11 +250,42 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
 
   app.get("/api/invocations", async () => {
     try {
-      const raw = await readFile(join(dataDir, "invocations.json"), "utf-8");
-      return { invocations: JSON.parse(raw) };
-    } catch {
+      const rows = getAllInvocations(dataDir);
+      // Convert rows to the format expected by the dashboard
+      const invocations = rows.map((row) => ({
+        timestamp: row.timestamp,
+        chatId: row.chatId,
+        tier: row.tier,
+        durationMs: row.durationMs,
+        durationApiMs: row.durationApiMs,
+        costUsd: row.costUsd,
+        numTurns: row.numTurns,
+        stopReason: row.stopReason,
+        isError: row.isError === 1 || row.isError === true,
+        modelUsage: row.modelUsage ? JSON.parse(row.modelUsage as string) : undefined,
+      }));
+      return { invocations };
+    } catch (err) {
+      logger.error({ err }, "Failed to read invocations from SQLite");
       return { invocations: [] };
     }
+  });
+
+  app.get("/api/lifetime-stats", async () => {
+    try {
+      const stats = getInvocationStats(dataDir);
+      return stats;
+    } catch (err) {
+      logger.error({ err }, "Failed to get invocation stats from SQLite");
+      return { error: "Failed to get stats" };
+    }
+  });
+
+  app.get("/api/logs", async (request) => {
+    const query = request.query as { lines?: string };
+    const lines = Math.min(parseInt(query.lines || "50", 10) || 50, 200);
+    const logs = await getRecentLogs(lines);
+    return { logs };
   });
 
   app.get("/api/health", async () => {

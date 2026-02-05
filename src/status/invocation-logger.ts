@@ -1,6 +1,14 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
-import { join } from "path";
 import { logger } from "../utils/logger.js";
+import {
+  getDatabase,
+  insertInvocation,
+  getRecentInvocations,
+  getInvocationStats,
+  closeDatabase,
+  type InsertInvocationData,
+  type InvocationStats,
+  type InvocationRow,
+} from "./database.js";
 
 export interface InvocationEntry {
   timestamp: number;
@@ -16,41 +24,72 @@ export interface InvocationEntry {
   modelUsage?: Record<string, any>;
 }
 
-const MAX_ENTRIES = 100;
+export { InvocationStats };
 
 export class InvocationLogger {
-  private entries: InvocationEntry[] = [];
-  private filePath: string;
+  private dataDir: string;
 
   constructor(dataDir: string) {
-    this.filePath = join(dataDir, "invocations.json");
+    this.dataDir = dataDir;
   }
 
   async load(): Promise<void> {
-    try {
-      const raw = await readFile(this.filePath, "utf-8");
-      this.entries = JSON.parse(raw);
-      logger.info({ count: this.entries.length }, "Invocations loaded");
-    } catch {
-      logger.info("No existing invocations file, starting fresh");
-    }
+    // Initialize the database connection
+    getDatabase(this.dataDir);
+    const stats = getInvocationStats(this.dataDir);
+    logger.info({ count: stats.totalInvocations }, "SQLite database loaded");
   }
 
   async log(entry: InvocationEntry): Promise<void> {
-    this.entries.push(entry);
-    if (this.entries.length > MAX_ENTRIES) {
-      this.entries = this.entries.slice(-MAX_ENTRIES);
-    }
     try {
-      await mkdir(join(this.filePath, ".."), { recursive: true });
-      await writeFile(this.filePath, JSON.stringify(this.entries, null, 2));
-      logger.debug("Invocation logged");
+      const data: InsertInvocationData = {
+        timestamp: entry.timestamp,
+        chatId: entry.chatId,
+        tier: entry.tier,
+        durationMs: entry.durationMs,
+        durationApiMs: entry.durationApiMs,
+        costUsd: entry.costUsd,
+        numTurns: entry.numTurns,
+        stopReason: entry.stopReason,
+        isError: entry.isError,
+        modelUsage: entry.modelUsage,
+      };
+      insertInvocation(data, this.dataDir);
+      logger.debug("Invocation logged to SQLite");
     } catch (err) {
-      logger.error({ err }, "Failed to save invocations");
+      logger.error({ err }, "Failed to log invocation to SQLite");
     }
   }
 
   getRecent(n: number): InvocationEntry[] {
-    return this.entries.slice(-n);
+    const rows = getRecentInvocations(n, this.dataDir);
+    return rows.map(rowToEntry);
   }
+
+  async getLifetimeStats(): Promise<InvocationStats> {
+    return getInvocationStats(this.dataDir);
+  }
+
+  close(): void {
+    closeDatabase();
+  }
+}
+
+/**
+ * Convert a database row back to the InvocationEntry format
+ * expected by the API consumers (dashboard, etc.)
+ */
+function rowToEntry(row: InvocationRow): InvocationEntry {
+  return {
+    timestamp: row.timestamp,
+    chatId: row.chatId ?? 0,
+    tier: row.tier as InvocationEntry["tier"],
+    durationMs: row.durationMs ?? undefined,
+    durationApiMs: row.durationApiMs ?? undefined,
+    costUsd: row.costUsd ?? undefined,
+    numTurns: row.numTurns ?? undefined,
+    stopReason: row.stopReason ?? undefined,
+    isError: row.isError === 1 || row.isError === true,
+    modelUsage: row.modelUsage ? JSON.parse(row.modelUsage as string) : undefined,
+  };
 }

@@ -1,0 +1,20 @@
+[Unit]
+Description=Rumpbot Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rumpbot
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/rumpbot/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rumpbot
+
+[Install]
+WantedBy=multi-user.target

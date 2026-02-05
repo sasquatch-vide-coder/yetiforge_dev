@@ -16,6 +16,12 @@ function timeAgo(timestamp: number): string {
   return `${days}d ago`;
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 export function CostCard({ invocations }: Props) {
   const totalCost = invocations.reduce((sum, i) => sum + (i.costUsd || 0), 0);
   const totalInvocations = invocations.length;
@@ -31,12 +37,14 @@ export function CostCard({ invocations }: Props) {
   let totalInput = 0;
   let totalOutput = 0;
   let totalCacheRead = 0;
+  let totalCacheCreation = 0;
   for (const inv of invocations) {
     if (inv.modelUsage) {
       for (const model of Object.values(inv.modelUsage)) {
-        totalInput += (model.inputTokens || 0);
+        totalInput += (model.inputTokens || 0) + (model.cacheCreationInputTokens || 0);
         totalOutput += (model.outputTokens || 0);
         totalCacheRead += (model.cacheReadInputTokens || 0);
+        totalCacheCreation += (model.cacheCreationInputTokens || 0);
       }
     }
   }
@@ -92,18 +100,22 @@ export function CostCard({ invocations }: Props) {
       {/* Token usage */}
       <div className="bg-brutal-bg brutal-border p-4 text-sm">
         <div className="font-bold uppercase text-xs tracking-widest mb-2">Token Usage (All Time)</div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
             <div className="text-xs uppercase text-brutal-black/60">Input</div>
-            <div className="font-bold">{(totalInput / 1000).toFixed(1)}k</div>
+            <div className="font-bold">{formatTokens(totalInput)}</div>
           </div>
           <div>
             <div className="text-xs uppercase text-brutal-black/60">Output</div>
-            <div className="font-bold">{(totalOutput / 1000).toFixed(1)}k</div>
+            <div className="font-bold">{formatTokens(totalOutput)}</div>
           </div>
           <div>
             <div className="text-xs uppercase text-brutal-black/60">Cache Read</div>
-            <div className="font-bold">{(totalCacheRead / 1000).toFixed(1)}k</div>
+            <div className="font-bold">{formatTokens(totalCacheRead)}</div>
+          </div>
+          <div>
+            <div className="text-xs uppercase text-brutal-black/60">Cache Write</div>
+            <div className="font-bold">{formatTokens(totalCacheCreation)}</div>
           </div>
         </div>
       </div>

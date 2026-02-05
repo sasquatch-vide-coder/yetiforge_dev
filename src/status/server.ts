@@ -221,13 +221,6 @@ export async function startStatusServer(dataDir: string, port: number = 3069) {
     };
   });
 
-  app.get("/api/logs", async (request) => {
-    const query = request.query as { lines?: string };
-    const lines = Math.min(parseInt(query.lines || "50", 10), 200);
-    const logs = await getRecentLogs(lines);
-    return { logs };
-  });
-
   app.get("/api/invocations", async () => {
     try {
       const raw = await readFile(join(dataDir, "invocations.json"), "utf-8");

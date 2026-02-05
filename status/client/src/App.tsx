@@ -1,11 +1,10 @@
 import { useStatus } from "./hooks/useStatus";
 import { ServiceCard } from "./components/ServiceCard";
 import { SystemCard } from "./components/SystemCard";
-import { SessionsCard } from "./components/SessionsCard";
-import { LogsCard } from "./components/LogsCard";
+import { CostCard } from "./components/CostCard";
 
 function App() {
-  const { status, logs, loading, error, connected } = useStatus();
+  const { status, invocations, loading, error, connected } = useStatus();
 
   return (
     <div className="min-h-screen bg-brutal-bg p-6 md:p-10">
@@ -63,12 +62,7 @@ function App() {
             diskTotal={status.system.diskTotal}
             diskPercent={status.system.diskPercent}
           />
-          <SessionsCard
-            sessionCount={status.bot.sessionCount}
-            lastActivity={status.bot.lastActivity}
-            sessions={status.bot.sessions}
-          />
-          <LogsCard logs={logs} />
+          <CostCard invocations={invocations} />
         </div>
       )}
 

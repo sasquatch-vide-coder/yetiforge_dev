@@ -43,14 +43,26 @@ export interface StatusData {
   projects: ProjectsStatus;
 }
 
+export interface InvocationEntry {
+  timestamp: number;
+  chatId: number;
+  durationMs?: number;
+  durationApiMs?: number;
+  costUsd?: number;
+  numTurns?: number;
+  stopReason?: string;
+  isError: boolean;
+  modelUsage?: Record<string, any>;
+}
+
 export function useStatus() {
   const [status, setStatus] = useState<StatusData | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [invocations, setInvocations] = useState<InvocationEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const statusTimer = useRef<ReturnType<typeof setInterval>>(undefined);
-  const logsTimer = useRef<ReturnType<typeof setInterval>>(undefined);
+  const invocationsTimer = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -68,29 +80,29 @@ export function useStatus() {
     }
   }, []);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchInvocations = useCallback(async () => {
     try {
-      const res = await fetch("/api/logs?lines=30");
+      const res = await fetch("/api/invocations");
       if (!res.ok) return;
       const data = await res.json();
-      setLogs(data.logs || []);
+      setInvocations(data.invocations || []);
     } catch {
-      // Logs are non-critical
+      // Non-critical
     }
   }, []);
 
   useEffect(() => {
     fetchStatus();
-    fetchLogs();
+    fetchInvocations();
 
     statusTimer.current = setInterval(fetchStatus, 3000);
-    logsTimer.current = setInterval(fetchLogs, 5000);
+    invocationsTimer.current = setInterval(fetchInvocations, 10000);
 
     return () => {
       clearInterval(statusTimer.current);
-      clearInterval(logsTimer.current);
+      clearInterval(invocationsTimer.current);
     };
-  }, [fetchStatus, fetchLogs]);
+  }, [fetchStatus, fetchInvocations]);
 
-  return { status, logs, loading, error, connected };
+  return { status, invocations, loading, error, connected };
 }

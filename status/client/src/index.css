@@ -33,3 +33,38 @@ body {
 .brutal-shadow-lg {
   box-shadow: 6px 6px 0 var(--color-brutal-black);
 }
+
+.overflow-wrap-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Prevent horizontal scroll on mobile by ensuring shadows don't cause overflow */
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+    position: relative;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  /* Remove shadows entirely on mobile to prevent any overflow */
+  .brutal-shadow {
+    box-shadow: none !important;
+  }
+
+  .brutal-shadow-lg {
+    box-shadow: none !important;
+  }
+
+  /* Ensure brutal borders don't cause width issues */
+  .brutal-border {
+    box-sizing: border-box;
+  }
+}

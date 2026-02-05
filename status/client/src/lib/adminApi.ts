@@ -58,9 +58,27 @@ export function getClaudeStatus(token: string) {
     authenticated: boolean;
     path: string | null;
     subscriptionType: string | null;
+    rateLimitTier: string | null;
     credentialsExist: boolean;
+    tokenExpiresAt: number | null;
     setupCommand: string;
   }>("/claude/status", { token });
+}
+
+export function checkClaudeUpdate(token: string) {
+  return request<{
+    currentVersion: string | null;
+    updateAvailable: boolean;
+    upToDate: boolean;
+    output: string;
+  }>("/claude/check-update", { token });
+}
+
+export function installClaudeUpdate(token: string) {
+  return request<{ ok: boolean; output: string }>("/claude/update", {
+    method: "POST",
+    token,
+  });
 }
 
 export function getTelegramStatus(token: string) {

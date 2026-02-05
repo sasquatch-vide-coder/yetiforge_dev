@@ -189,7 +189,9 @@ export async function registerAdminRoutes(
         authenticated: boolean;
         path: string | null;
         subscriptionType: string | null;
+        rateLimitTier: string | null;
         credentialsExist: boolean;
+        tokenExpiresAt: number | null;
         setupCommand: string;
       } = {
         installed: false,
@@ -197,8 +199,10 @@ export async function registerAdminRoutes(
         authenticated: false,
         path: null,
         subscriptionType: null,
+        rateLimitTier: null,
         credentialsExist: false,
-        setupCommand: "ssh into server, then run: claude setup-token",
+        tokenExpiresAt: null,
+        setupCommand: "claude setup-token",
       };
 
       // Check if credentials file exists and read subscription info
@@ -211,8 +215,9 @@ export async function registerAdminRoutes(
         const creds = JSON.parse(credsRaw);
         if (creds.claudeAiOauth) {
           result.subscriptionType = creds.claudeAiOauth.subscriptionType || null;
-          // Check if token is expired
+          result.rateLimitTier = creds.claudeAiOauth.rateLimitTier || null;
           const expiresAt = creds.claudeAiOauth.expiresAt;
+          result.tokenExpiresAt = expiresAt || null;
           if (expiresAt && Date.now() < expiresAt) {
             result.authenticated = true;
           }
@@ -233,6 +238,54 @@ export async function registerAdminRoutes(
       } catch {}
 
       return result;
+    }
+  );
+
+  // ── Claude Code Update Check ──
+  app.get(
+    "/api/admin/claude/check-update",
+    { preHandler: authHook },
+    async () => {
+      return new Promise((resolve) => {
+        exec(
+          "claude update 2>&1",
+          { encoding: "utf-8", timeout: 30000 },
+          (err, stdout) => {
+            const output = stdout || (err?.message ?? "");
+            const currentMatch = output.match(/Current version:\s*(\S+)/);
+            const upToDate = output.includes("up to date");
+            const updateAvailable = output.includes("Updating") || output.includes("update available");
+
+            resolve({
+              currentVersion: currentMatch?.[1] || null,
+              updateAvailable,
+              upToDate,
+              output: output.trim(),
+            });
+          }
+        );
+      });
+    }
+  );
+
+  // ── Claude Code Install Update ──
+  app.post(
+    "/api/admin/claude/update",
+    { preHandler: authHook },
+    async () => {
+      return new Promise((resolve) => {
+        exec(
+          "claude update 2>&1",
+          { encoding: "utf-8", timeout: 120000 },
+          (err, stdout) => {
+            const output = stdout || (err?.message ?? "");
+            resolve({
+              ok: !err,
+              output: output.trim(),
+            });
+          }
+        );
+      });
     }
   );
 

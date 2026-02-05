@@ -19,9 +19,13 @@ The Claude agent working on this project follows specific behavioral rules. Thes
 - Ask clarifying questions one at a time, not batched
 - Don't dump raw output — summarize and explain
 
-### Planning (ALWAYS follow this)
-- Use **planning mode** for any non-trivial task before writing code
-- Plan first, get user approval, then execute
+### Planning (ALWAYS follow this for non-trivial tasks)
+1. **Plan** — Enter planning mode, explore the codebase, design the approach
+2. **Propose** — Present the plan to the user for approval
+3. **Verify** — After approval, review the plan once more before starting to make sure nothing was missed
+4. **Execute** — Build it
+5. **Report** — Confirm completion and summarize what was done
+
 - Trivial tasks (typo fixes, single-line changes, simple questions) can skip planning
 - When in doubt, plan. It's cheaper to plan than to redo work
 

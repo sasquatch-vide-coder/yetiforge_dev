@@ -14,6 +14,16 @@ interface LifetimeStats {
   lastUpdatedAt: string;
 }
 
+interface AggregateStats {
+  totalCost: number;
+  totalInvocations: number;
+  errors: number;
+  p50DurationMs: number;
+  p95DurationMs: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+}
+
 interface Props {
   invocations: InvocationEntry[];
 }
@@ -36,9 +46,34 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+function extractPrimaryModel(modelUsage?: Record<string, any>): string {
+  if (!modelUsage || typeof modelUsage !== "object") return "—";
+  const models = Object.keys(modelUsage);
+  if (models.length === 0) return "—";
+  // Return the model with the most tokens
+  let best = models[0];
+  let bestTokens = 0;
+  for (const m of models) {
+    const u = modelUsage[m];
+    const tokens = (u?.inputTokens || 0) + (u?.outputTokens || 0);
+    if (tokens > bestTokens) {
+      bestTokens = tokens;
+      best = m;
+    }
+  }
+  // Shorten model name for display
+  return best.replace("claude-", "").replace("anthropic.", "");
+}
+
+type TierFilter = "all" | "chat" | "orchestrator" | "worker";
+type StatusFilter = "all" | "success" | "error";
+
 export function CostCard({ invocations }: Props) {
   const { token } = useAdminAuth();
   const [lifetimeStats, setLifetimeStats] = useState<LifetimeStats | null>(null);
+  const [aggStats, setAggStats] = useState<AggregateStats | null>(null);
+  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const fetchLifetimeStats = useCallback(async () => {
     try {
@@ -55,19 +90,36 @@ export function CostCard({ invocations }: Props) {
     }
   }, [token]);
 
+  const fetchAggStats = useCallback(async () => {
+    try {
+      const headers: HeadersInit = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch("/api/stats", { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.error) {
+        setAggStats(data);
+      }
+    } catch {
+      // Non-critical
+    }
+  }, [token]);
+
   useEffect(() => {
     fetchLifetimeStats();
-    const timer = setInterval(fetchLifetimeStats, 10000);
-    return () => clearInterval(timer);
-  }, [fetchLifetimeStats]);
+    fetchAggStats();
+    const timer1 = setInterval(fetchLifetimeStats, 10000);
+    const timer2 = setInterval(fetchAggStats, 10000);
+    return () => {
+      clearInterval(timer1);
+      clearInterval(timer2);
+    };
+  }, [fetchLifetimeStats, fetchAggStats]);
 
   // Rolling window stats from recent invocations
   const recentCost = invocations.reduce((sum, i) => sum + (i.costUsd || 0), 0);
   const recentCount = invocations.length;
   const avgCost = recentCount > 0 ? recentCost / recentCount : 0;
-  const avgDuration = recentCount > 0
-    ? invocations.reduce((sum, i) => sum + (i.durationMs || 0), 0) / recentCount / 1000
-    : 0;
   const totalTurns = invocations.reduce((sum, i) => sum + (i.numTurns || 0), 0);
   const errors = invocations.filter((i) => i.isError).length;
   const recentMaxTurnsHits = invocations.filter((i) => i.stopReason === "error_max_turns").length;
@@ -81,14 +133,46 @@ export function CostCard({ invocations }: Props) {
   const allTimeCacheRead = lifetimeStats?.totalCacheReadTokens ?? 0;
   const allTimeCacheCreation = lifetimeStats?.totalCacheCreationTokens ?? 0;
 
+  // Error rate
+  const totalInv = aggStats?.totalInvocations ?? allTimeInvocations;
+  const totalErrors = aggStats?.errors ?? errors;
+  const errorRate = totalInv > 0 ? (totalErrors / totalInv) * 100 : 0;
+  const errorRateColor = errorRate < 2 ? "text-brutal-green" : errorRate <= 5 ? "text-brutal-yellow" : "text-brutal-red";
+
+  // Cache hit rate
+  const cacheRead = allTimeCacheRead;
+  const cacheCreation = allTimeCacheCreation;
+  const cacheTotal = cacheRead + cacheCreation;
+  const cacheHitRate = cacheTotal > 0 ? (cacheRead / cacheTotal) * 100 : 0;
+  const cacheHitColor = cacheHitRate > 70 ? "text-brutal-green" : cacheHitRate >= 40 ? "text-brutal-yellow" : "text-brutal-red";
+
+  // P50 / P95 latency
+  const p50 = aggStats?.p50DurationMs ?? 0;
+  const p95 = aggStats?.p95DurationMs ?? 0;
+
+  // Filtered invocations for table
+  const filteredInvocations = invocations.filter((inv) => {
+    if (tierFilter !== "all" && inv.tier !== tierFilter) return false;
+    if (statusFilter === "success" && inv.isError) return false;
+    if (statusFilter === "error" && !inv.isError) return false;
+    return true;
+  });
+
+  const filterBtnClass = (active: boolean) =>
+    `px-2 py-1 text-xs font-bold uppercase font-mono brutal-border transition-all ${
+      active
+        ? "bg-brutal-black text-brutal-white"
+        : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
+    }`;
+
   return (
     <div className="bg-brutal-white brutal-border brutal-shadow p-6 col-span-full lg:col-span-2">
       <h2 className="text-sm uppercase tracking-widest mb-4 font-bold">
         Cost & Usage
       </h2>
 
-      {/* All Time stats from lifetime persistence */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      {/* All Time stats — top row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
         <div className="bg-brutal-yellow brutal-border p-3">
           <div className="text-xs uppercase font-bold">All Time Cost</div>
           <div className="text-2xl font-bold">${allTimeCost.toFixed(2)}</div>
@@ -107,8 +191,36 @@ export function CostCard({ invocations }: Props) {
         </div>
       </div>
 
+      {/* Key metrics row: Error Rate, Cache Hit Rate, P50/P95 */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-brutal-bg brutal-border p-3">
+          <div className="text-xs uppercase font-bold">Error Rate</div>
+          <div className={`text-2xl font-bold ${errorRateColor}`}>
+            {errorRate.toFixed(1)}%
+          </div>
+          <div className="text-xs text-brutal-black/50">{totalErrors} / {totalInv}</div>
+        </div>
+        <div className="bg-brutal-bg brutal-border p-3">
+          <div className="text-xs uppercase font-bold">Cache Hit Rate</div>
+          <div className={`text-2xl font-bold ${cacheHitColor}`}>
+            {cacheHitRate.toFixed(1)}%
+          </div>
+          <div className="text-xs text-brutal-black/50">
+            {formatTokens(cacheRead)} read / {formatTokens(cacheTotal)} total
+          </div>
+        </div>
+        <div className="bg-brutal-bg brutal-border p-3">
+          <div className="text-xs uppercase font-bold">P50 / P95 Latency</div>
+          <div className="text-2xl font-bold">
+            {(p50 / 1000).toFixed(0)}s{" "}
+            <span className="text-brutal-black/40">/</span>{" "}
+            {(p95 / 1000).toFixed(0)}s
+          </div>
+        </div>
+      </div>
+
       {/* Recent Activity stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 text-sm">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6 text-sm">
         <div className="flex justify-between">
           <span className="font-bold uppercase">Recent Cost</span>
           <span>${recentCost.toFixed(2)}</span>
@@ -118,12 +230,8 @@ export function CostCard({ invocations }: Props) {
           <span>{totalTurns}</span>
         </div>
         <div className="flex justify-between">
-          <span className="font-bold uppercase">Errors</span>
+          <span className="font-bold uppercase">Recent Errors</span>
           <span className={errors > 0 ? "text-brutal-red font-bold" : ""}>{errors}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold uppercase">Avg Duration</span>
-          <span>{avgDuration.toFixed(1)}s</span>
         </div>
       </div>
 
@@ -158,30 +266,97 @@ export function CostCard({ invocations }: Props) {
         </div>
       )}
 
-      {/* Recent invocations */}
+      {/* Recent invocations with filters */}
       {invocations.length > 0 && (
         <div className="mt-4">
-          <div className="font-bold uppercase text-xs tracking-widest mb-2">Recent</div>
-          <div className="space-y-1 max-h-40 overflow-y-auto">
-            {invocations.slice(0, 10).map((inv, i) => (
-              <div key={i} className="flex justify-between text-xs bg-brutal-bg brutal-border px-3 py-1">
-                <span>{timeAgo(inv.timestamp)}</span>
-                {inv.tier && (
-                  <span className="text-brutal-black/50 uppercase">{inv.tier.slice(0, 4)}</span>
-                )}
-                <span>{inv.numTurns || 0} turns</span>
-                <span>{((inv.durationMs || 0) / 1000).toFixed(1)}s</span>
-                <span className="font-bold">${(inv.costUsd || 0).toFixed(2)}</span>
-                <span className={
-                  inv.isError ? "text-brutal-red" :
-                  inv.stopReason === "error_max_turns" ? "text-brutal-orange" :
-                  "text-brutal-green"
-                }>
-                  {inv.isError ? "ERR" : inv.stopReason === "error_max_turns" ? "MAX" : "OK"}
-                </span>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <div className="font-bold uppercase text-xs tracking-widest mr-2">Recent</div>
+
+            {/* Tier filters */}
+            <div className="flex gap-0">
+              {(["all", "chat", "orchestrator", "worker"] as TierFilter[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTierFilter(t)}
+                  className={filterBtnClass(tierFilter === t)}
+                >
+                  {t === "all" ? "All Tiers" : t}
+                </button>
+              ))}
+            </div>
+
+            {/* Status filters */}
+            <div className="flex gap-0 ml-2">
+              {(["all", "success", "error"] as StatusFilter[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={filterBtnClass(statusFilter === s)}
+                >
+                  {s === "all" ? "All Status" : s}
+                </button>
+              ))}
+            </div>
           </div>
+
+          <div className="w-full overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-brutal-black text-brutal-white uppercase">
+                  <th className="px-2 py-1 text-left">Time</th>
+                  <th className="px-2 py-1 text-left">Tier</th>
+                  <th className="px-2 py-1 text-left">Model</th>
+                  <th className="px-2 py-1 text-right">Turns</th>
+                  <th className="px-2 py-1 text-right">Duration</th>
+                  <th className="px-2 py-1 text-right">Cost</th>
+                  <th className="px-2 py-1 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInvocations.slice(0, 20).map((inv, i) => (
+                  <tr
+                    key={i}
+                    className={`brutal-border border-b ${
+                      i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"
+                    }`}
+                  >
+                    <td className="px-2 py-1">{timeAgo(inv.timestamp)}</td>
+                    <td className="px-2 py-1 uppercase text-brutal-black/60">
+                      {inv.tier ? inv.tier.slice(0, 5) : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-brutal-black/70 truncate max-w-[120px]">
+                      {extractPrimaryModel(inv.modelUsage)}
+                    </td>
+                    <td className="px-2 py-1 text-right">{inv.numTurns || 0}</td>
+                    <td className="px-2 py-1 text-right">
+                      {((inv.durationMs || 0) / 1000).toFixed(1)}s
+                    </td>
+                    <td className="px-2 py-1 text-right font-bold">
+                      ${(inv.costUsd || 0).toFixed(2)}
+                    </td>
+                    <td className="px-2 py-1 text-center">
+                      <span
+                        className={`px-1 py-0.5 font-bold ${
+                          inv.isError
+                            ? "bg-brutal-red text-brutal-white"
+                            : inv.stopReason === "error_max_turns"
+                              ? "bg-brutal-orange text-brutal-white"
+                              : "bg-brutal-green text-brutal-black"
+                        }`}
+                      >
+                        {inv.isError ? "ERR" : inv.stopReason === "error_max_turns" ? "MAX" : "OK"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredInvocations.length === 0 && (
+            <div className="text-center text-xs text-brutal-black/40 py-3 uppercase">
+              No invocations match filters
+            </div>
+          )}
         </div>
       )}
     </div>

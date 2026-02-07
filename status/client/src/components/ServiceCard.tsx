@@ -1,11 +1,10 @@
 interface Props {
   status: string;
   uptime: string | null;
-  pid: number | null;
   memory: string | null;
 }
 
-export function ServiceCard({ status, uptime, pid, memory }: Props) {
+export function ServiceCard({ status, uptime, memory }: Props) {
   const isOnline = status === "active";
 
   return (
@@ -27,10 +26,6 @@ export function ServiceCard({ status, uptime, pid, memory }: Props) {
         <div className="flex justify-between">
           <span className="font-bold uppercase">Uptime</span>
           <span>{uptime || "—"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="font-bold uppercase">PID</span>
-          <span>{pid || "—"}</span>
         </div>
         <div className="flex justify-between">
           <span className="font-bold uppercase">Memory</span>

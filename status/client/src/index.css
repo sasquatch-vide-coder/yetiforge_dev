@@ -68,3 +68,20 @@ body {
     box-sizing: border-box;
   }
 }
+
+/* Skeleton loading animation */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-brutal-bg) 25%,
+    var(--color-brutal-white) 50%,
+    var(--color-brutal-bg) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

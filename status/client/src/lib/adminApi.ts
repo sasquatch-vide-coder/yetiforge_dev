@@ -1,5 +1,7 @@
 const API_BASE = "/api/admin";
 
+const TOKEN_KEY = "rumpbot_admin_token";
+
 async function request<T = Record<string, unknown>>(
   path: string,
   options?: RequestInit & { token?: string }
@@ -18,7 +20,21 @@ async function request<T = Record<string, unknown>>(
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error((err as Record<string, string>).error || "Request failed");
+    const errorMessage = (err as Record<string, string>).error || "Request failed";
+
+    // If the server returns 401 Unauthorized on an authenticated request,
+    // the token is invalid/expired/revoked — clear it and redirect to login.
+    // BUT: don't do this for the MFA verify endpoint — 401 there means
+    // wrong code or expired partial token, not an invalid session.
+    const isMfaVerify = path === "/mfa/verify";
+    if (res.status === 401 && options?.token && !isMfaVerify) {
+      localStorage.removeItem(TOKEN_KEY);
+      // Defer redirect so the error propagates first — immediate redirect
+      // aborts in-flight fetches and causes "Load failed" in Safari
+      setTimeout(() => { window.location.href = "/admin"; }, 100);
+    }
+
+    throw new Error(errorMessage);
   }
   return res.json() as Promise<T>;
 }
@@ -322,6 +338,139 @@ export interface ChatHistoryMessage {
 export function getChatHistory(token: string) {
   return request<{ messages: ChatHistoryMessage[] }>("/chat/history", {
     method: "GET",
+    token,
+  });
+}
+
+// Audit Log
+export function getAuditLog(token: string, opts?: { limit?: number; action?: string; from?: number; to?: number }) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.action) params.set("action", opts.action);
+  if (opts?.from) params.set("from", String(opts.from));
+  if (opts?.to) params.set("to", String(opts.to));
+  const qs = params.toString();
+  return request<{ entries: any[]; actions?: string[] }>(`/audit-log${qs ? `?${qs}` : ""}`, { token });
+}
+
+// Security: Login Attempts
+export function getLoginAttempts(token: string) {
+  return request<{ attempts: Record<string, any> }>("/security/login-attempts", { token });
+}
+
+export function unlockIp(ip: string, token: string) {
+  return request<{ ok: boolean }>("/security/unlock-ip", {
+    method: "POST",
+    body: JSON.stringify({ ip }),
+    token,
+  });
+}
+
+// Sessions
+export function getAdminSessions(token: string) {
+  return request<{ sessions: any[] }>("/sessions", { token });
+}
+
+export function revokeAdminSession(jti: string, token: string) {
+  return request<{ ok: boolean; revoked: boolean }>("/sessions/revoke", {
+    method: "POST",
+    body: JSON.stringify({ jti }),
+    token,
+  });
+}
+
+export function revokeAllAdminSessions(token: string) {
+  return request<{ ok: boolean; revokedCount: number }>("/sessions/revoke-all", {
+    method: "POST",
+    token,
+  });
+}
+
+// IP Whitelist
+export function getIpWhitelist(token: string) {
+  return request<{ whitelist: string[] | null }>("/security/ip-whitelist", { token });
+}
+
+export function setIpWhitelist(ips: string[] | null, token: string) {
+  return request<{ ok: boolean; whitelist: string[] | null }>("/security/ip-whitelist", {
+    method: "POST",
+    body: JSON.stringify({ ips }),
+    token,
+  });
+}
+
+// Chat Export
+export async function exportChatHistory(format: "json" | "text", token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/chat/export?format=${format}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Export failed");
+  const blob = await res.blob();
+  const ext = format === "json" ? "json" : "txt";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chat-export-${Date.now()}.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Alerts
+export function getAlerts(token: string, includeAll: boolean = false) {
+  return request<{ alerts: any[] }>(`/alerts${includeAll ? "?all=true" : ""}`, { token });
+}
+
+export function acknowledgeAlert(id: string, token: string) {
+  return request<{ ok: boolean }>(`/alerts/${id}/acknowledge`, { method: "POST", token });
+}
+
+export function getAlertCount(token: string) {
+  return request<{ count: number }>("/alerts/count", { token });
+}
+
+// Backups
+export function createBackup(token: string) {
+  return request<{ ok: boolean; backup: any }>("/backup/create", { method: "POST", token });
+}
+
+export function listBackups(token: string) {
+  return request<{ backups: any[] }>("/backup/list", { token });
+}
+
+export function restoreBackup(id: string, token: string) {
+  return request<{ ok: boolean; restoredFiles: string[] }>("/backup/restore", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+    token,
+  });
+}
+
+export function deleteBackup(id: string, token: string) {
+  return request<{ ok: boolean }>(`/backup/${id}`, { method: "DELETE", token });
+}
+
+// Config History
+export function getConfigHistory(type: string, token: string) {
+  return request<{ history: any[] }>(`/config/history?type=${type}`, { token });
+}
+
+export function rollbackConfig(type: string, snapshotId: string, token: string) {
+  return request<{ ok: boolean }>("/config/rollback", {
+    method: "POST",
+    body: JSON.stringify({ type, snapshotId }),
+    token,
+  });
+}
+
+// Config Export/Import
+export function exportConfig(token: string) {
+  return request<any>("/config/export", { token });
+}
+
+export function importConfig(data: any, token: string) {
+  return request<{ ok: boolean; applied: string[] }>("/config/import", {
+    method: "POST",
+    body: JSON.stringify(data),
     token,
   });
 }

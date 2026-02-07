@@ -209,6 +209,50 @@ export function getInvocationStats(dataDir?: string): InvocationStats {
   };
 }
 
+export interface DailyStatsRow {
+  date: string;
+  cost: number;
+  totalTokens: number;
+}
+
+export function getDailyStats(dataDir?: string): DailyStatsRow[] {
+  const database = getDatabase(dataDir);
+
+  // Query aggregated daily stats for the last 30 days
+  const rows = database.prepare(`
+    SELECT
+      date(timestamp/1000, 'unixepoch') as date,
+      COALESCE(SUM(costUsd), 0) as cost,
+      COALESCE(SUM(inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens), 0) as totalTokens
+    FROM invocations
+    WHERE timestamp >= (strftime('%s','now') - 30*86400) * 1000
+    GROUP BY date(timestamp/1000, 'unixepoch')
+    ORDER BY date ASC
+  `).all() as DailyStatsRow[];
+
+  // Build a map of query results keyed by date
+  const resultMap = new Map<string, DailyStatsRow>();
+  for (const row of rows) {
+    resultMap.set(row.date, {
+      date: row.date,
+      cost: Math.round(row.cost * 10000) / 10000,
+      totalTokens: row.totalTokens || 0,
+    });
+  }
+
+  // Fill in all 30 days so there are no gaps
+  const dailyStats: DailyStatsRow[] = [];
+  const now = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    const dateStr = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    dailyStats.push(resultMap.get(dateStr) || { date: dateStr, cost: 0, totalTokens: 0 });
+  }
+
+  return dailyStats;
+}
+
 /**
  * Close the database connection (for graceful shutdown).
  */

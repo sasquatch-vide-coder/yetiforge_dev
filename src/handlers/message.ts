@@ -1,4 +1,5 @@
 import { Context } from "grammy";
+import { spawn } from "child_process";
 import { Config } from "../config.js";
 import { SessionManager } from "../claude/session-manager.js";
 import { ProjectManager } from "../projects/project-manager.js";
@@ -6,8 +7,14 @@ import { ChatLocks } from "../middleware/rate-limit.js";
 import { InvocationLogger } from "../status/invocation-logger.js";
 import { ChatAgent } from "../agents/chat-agent.js";
 import { Orchestrator } from "../agents/orchestrator.js";
+import { PendingResponseManager } from "../pending-responses.js";
+import { MemoryManager } from "../memory-manager.js";
 import { startTypingIndicator, sendResponse, editMessage } from "../utils/telegram.js";
 import { logger } from "../utils/logger.js";
+
+// Module-level references so orchestrateInBackground can access them
+let _pendingResponses: PendingResponseManager | null = null;
+let _memoryManager: MemoryManager | null = null;
 
 export async function handleMessage(
   ctx: Context,
@@ -18,7 +25,11 @@ export async function handleMessage(
   invocationLogger: InvocationLogger,
   chatAgent: ChatAgent,
   orchestrator: Orchestrator,
+  pendingResponses?: PendingResponseManager,
+  memoryManager?: MemoryManager,
 ): Promise<void> {
+  if (pendingResponses) _pendingResponses = pendingResponses;
+  if (memoryManager) _memoryManager = memoryManager;
   const chatId = ctx.chat?.id;
   const text = ctx.message?.text;
   if (!chatId || !text) return;
@@ -33,12 +44,16 @@ export async function handleMessage(
 
     logger.info({ chatId, projectDir, promptLength: text.length }, "Processing message via three-tier pipeline");
 
+    // Build memory context for this user
+    const memoryContext = _memoryManager?.buildMemoryContext(chatId) ?? undefined;
+
     // Step 1: Chat Agent — decides if this is chat or work
     const chatResult = await chatAgent.invoke({
       chatId,
       prompt: text,
       cwd: projectDir,
       abortSignal: controller.signal,
+      memoryContext,
       onInvocation: (raw) => {
         const entry = Array.isArray(raw)
           ? raw.find((item: any) => item.type === "result") || raw[0]
@@ -60,6 +75,11 @@ export async function handleMessage(
       },
     });
 
+    // Save any auto-detected memory notes
+    if (chatResult.memoryNote && _memoryManager) {
+      _memoryManager.addNote(chatId, chatResult.memoryNote, "auto");
+    }
+
     // Step 2: Send immediate chat response
     if (chatResult.chatResponse) {
       await sendResponse(ctx, chatResult.chatResponse);
@@ -71,11 +91,9 @@ export async function handleMessage(
     logger.info({ chatId, costUsd: chatResult.claudeResult.costUsd }, "Message processed");
 
     // Step 3: If work is needed, orchestrate in the BACKGROUND
-    // This allows the chat lock to be released immediately, so the user can keep interacting
     if (chatResult.workRequest) {
       logger.info({ chatId, task: chatResult.workRequest.task }, "Work request detected, starting background orchestration");
 
-      // Run orchestration in background without awaiting
       orchestrateInBackground(
         chatId,
         chatResult.workRequest,
@@ -112,7 +130,6 @@ export async function handleMessage(
 
 /**
  * Runs orchestration in the background without blocking the message handler.
- * This is a fire-and-forget operation that doesn't hold the chat lock.
  */
 async function orchestrateInBackground(
   chatId: number,
@@ -124,46 +141,42 @@ async function orchestrateInBackground(
   invocationLogger: InvocationLogger
 ): Promise<void> {
   try {
-    // Send initial "working..." message and capture its messageId for editing
+    // Send initial "working" message — this one gets edited in-place for heartbeats
     let workingMessageId: number | null = null;
     try {
       const msg = await ctx.reply("⏳ Working on your request...");
       workingMessageId = msg.message_id;
-    } catch {
-      // If initial message fails, orchestration can continue without editing
+    } catch (err) {
+      // If initial message fails, we'll fall back to new messages for everything
+      logger.warn({ chatId, err }, "Failed to send initial working message — will use new messages for all updates");
     }
+
+    // Rate-limit tracker for transient edits only
+    let lastEditTime = 0;
+    const EDIT_THROTTLE_MS = 5000;
 
     const summary = await orchestrator.execute({
       chatId,
       workRequest,
       cwd: projectDir,
       onStatusUpdate: async (update) => {
-        if (!workingMessageId) return;
-
-        // Plan breakdown and worker completion get sent as new messages (they're too long for edits)
-        if (update.type === "plan_breakdown") {
+        if (update.important) {
+          // Important updates → send as a NEW message so user gets a Telegram notification
           try {
-            await ctx.reply(update.message, { parse_mode: "Markdown" });
+            await ctx.reply(update.message);
           } catch {
-            await ctx.reply(update.message).catch(() => {});
+            // Fallback: try without any formatting
+            await ctx.reply(update.message.replace(/[*_`]/g, "")).catch(() => {});
           }
-          return;
+        } else {
+          // Transient updates (heartbeats, "still running") → edit the working message in-place
+          if (!workingMessageId) return;
+          const now = Date.now();
+          if (now - lastEditTime < EDIT_THROTTLE_MS) return; // throttle edits
+          lastEditTime = now;
+          const msg = update.progress ? `${update.message} (${update.progress})` : update.message;
+          await editMessage(ctx, workingMessageId, `⏳ ${msg}`).catch(() => {});
         }
-
-        if (update.type === "worker_complete") {
-          // Send worker completion with summary as a new message
-          try {
-            await ctx.reply(update.message, { parse_mode: "Markdown" });
-          } catch {
-            await ctx.reply(update.message).catch(() => {});
-          }
-          return;
-        }
-
-        // Regular status updates — edit the working message
-        const msg = update.progress ? `${update.message} (${update.progress})` : update.message;
-        // Edit the working message with progress
-        await editMessage(ctx, workingMessageId, `⏳ ${msg}`).catch(() => {});
       },
       onInvocation: (raw) => {
         const entry = Array.isArray(raw)
@@ -173,7 +186,7 @@ async function orchestrateInBackground(
           invocationLogger.log({
             timestamp: Date.now(),
             chatId,
-            tier: "orchestrator",
+            tier: entry._tier || "orchestrator",
             durationMs: entry.durationms || entry.duration_ms,
             durationApiMs: entry.durationapims || entry.duration_api_ms,
             costUsd: entry.totalcostusd || entry.total_cost_usd || entry.cost_usd,
@@ -186,13 +199,16 @@ async function orchestrateInBackground(
       },
     });
 
-    // Get Tiffany-voiced summary
+    // Get Tiffany-voiced summary (with memory context)
     const summaryPrompt = `Work has been completed. Here's a summary of what was done:\n\n${summary.summary}\n\nOverall success: ${summary.overallSuccess}\nTotal cost: $${summary.totalCostUsd.toFixed(4)}\n\nSummarize this for the user in your own words.`;
+
+    const memoryContext = _memoryManager?.buildMemoryContext(chatId) ?? undefined;
 
     const finalResult = await chatAgent.invoke({
       chatId,
       prompt: summaryPrompt,
       cwd: projectDir,
+      memoryContext,
       onInvocation: (raw) => {
         const entry = Array.isArray(raw)
           ? raw.find((item: any) => item.type === "result") || raw[0]
@@ -214,16 +230,63 @@ async function orchestrateInBackground(
       },
     });
 
-    // Update the working message with final result, or send if message editing failed
+    // Save any memory notes from the summary response
+    if (finalResult.memoryNote && _memoryManager) {
+      _memoryManager.addNote(chatId, finalResult.memoryNote, "auto");
+    }
+
+    // Persist response to disk BEFORE sending — survives process death
     const finalMsg = finalResult.chatResponse || summary.summary;
+    const prefix = summary.overallSuccess ? "✅" : "❌";
+    const fullMsg = `${prefix} ${finalMsg}`;
+
+    let pendingId: string | null = null;
+    if (_pendingResponses) {
+      pendingId = _pendingResponses.add(chatId, fullMsg, summary.overallSuccess);
+    }
+
+    // Delete the working message (it's no longer needed) and send final result as NEW message
     if (workingMessageId) {
-      const prefix = summary.overallSuccess ? "✅" : "❌";
-      await editMessage(ctx, workingMessageId, `${prefix} ${finalMsg}`).catch(async () => {
-        // If editing fails, send as new message
-        await sendResponse(ctx, finalMsg);
+      try {
+        await ctx.api.deleteMessage(ctx.chat!.id, workingMessageId);
+      } catch {
+        // If delete fails, edit it to show completion instead
+        await editMessage(ctx, workingMessageId, "✅ Done — see below").catch(() => {});
+      }
+    }
+
+    // Always send final result as a NEW message so the user gets a notification
+    await sendResponse(ctx, fullMsg);
+
+    // Response delivered — remove from pending
+    if (pendingId && _pendingResponses) {
+      _pendingResponses.remove(pendingId);
+    }
+
+    // Check if a restart is needed after orchestration completes
+    let shouldRestart = summary.needsRestart === true;
+
+    if (!shouldRestart) {
+      const textToCheck = [
+        summary.summary,
+        workRequest.task || "",
+        ...summary.workerResults.map((w: any) => w.result),
+      ].join(" ").toLowerCase();
+
+      const mentionsRestart = textToCheck.includes("restart");
+      const mentionsService = textToCheck.includes("tiffbot") || textToCheck.includes("service");
+      if (mentionsRestart && mentionsService) {
+        shouldRestart = true;
+      }
+    }
+
+    if (shouldRestart) {
+      logger.info({ chatId }, "Scheduling delayed tiffbot restart...");
+      const restartProc = spawn("bash", ["-c", "sleep 3 && sudo systemctl restart tiffbot"], {
+        detached: true,
+        stdio: "ignore",
       });
-    } else {
-      await sendResponse(ctx, finalMsg);
+      restartProc.unref();
     }
 
     logger.info({
@@ -231,6 +294,7 @@ async function orchestrateInBackground(
       overallSuccess: summary.overallSuccess,
       workerCount: summary.workerResults.length,
       totalCostUsd: summary.totalCostUsd,
+      restartScheduled: shouldRestart,
     }, "Background orchestration complete");
   } catch (err: any) {
     logger.error({ chatId, err }, "Background orchestration error");

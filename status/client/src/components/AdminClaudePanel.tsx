@@ -21,6 +21,37 @@ interface ClaudeStatus {
   setupCommand: string;
 }
 
+function decodeRateLimitTier(tier: string): string {
+  // Common patterns: "tier_4_2025_09_29" or similar
+  // Extract meaningful parts
+  const cleaned = tier.replace(/_/g, " ").trim();
+
+  // Try to extract tier number pattern like "tier 4"
+  const tierMatch = tier.match(/tier[_ ]?(\d+)/i);
+  if (tierMatch) {
+    return `Tier ${tierMatch[1]}`;
+  }
+
+  // Try to extract rate limit numbers
+  const limitMatch = tier.match(/(\d+)\s*(?:per|\/)\s*(minute|min|hour|hr|day|second|sec)/i);
+  if (limitMatch) {
+    const units: Record<string, string> = {
+      minute: "min", min: "min", hour: "hr", hr: "hr",
+      day: "day", second: "sec", sec: "sec",
+    };
+    return `${limitMatch[1]} req/${units[limitMatch[2].toLowerCase()] || limitMatch[2]}`;
+  }
+
+  // If it's short enough and looks decent after underscore replacement, use it cleaned
+  if (cleaned.length <= 30) {
+    // Capitalize first letter of each word
+    return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // Fallback: just clean up underscores
+  return cleaned;
+}
+
 function formatExpiry(expiresAt: number): string {
   const now = Date.now();
   const diff = expiresAt - now;
@@ -165,8 +196,8 @@ export function AdminClaudePanel({ token }: Props) {
           {status.rateLimitTier && (
             <div className="flex justify-between">
               <span className="uppercase font-bold">Rate Limit</span>
-              <span className="text-xs">
-                {status.rateLimitTier.replace(/_/g, " ")}
+              <span className="text-xs px-2 py-0.5 font-bold bg-brutal-blue/20">
+                {decodeRateLimitTier(status.rateLimitTier)}
               </span>
             </div>
           )}

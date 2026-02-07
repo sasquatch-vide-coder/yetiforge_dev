@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useAdminAuth } from "../hooks/useAdminAuth";
 import { useStatus } from "../hooks/useStatus";
@@ -13,9 +13,36 @@ import { AgentsPanel } from "../components/AgentsPanel";
 import { ServiceCard } from "../components/ServiceCard";
 import { SystemCard } from "../components/SystemCard";
 import { CostCard } from "../components/CostCard";
+import { CostTokenChart } from "../components/CostTokenChart";
+import { ModelBreakdown } from "../components/ModelBreakdown";
+import { AuditLogPanel } from "../components/AuditLogPanel";
+import { SessionsPanel } from "../components/SessionsPanel";
+import { BackupPanel } from "../components/BackupPanel";
+import { AlertsPanel } from "../components/AlertsPanel";
+import { AlertsBanner } from "../components/AlertsBanner";
+import { AgentMetricsPanel } from "../components/AgentMetricsPanel";
+import { SystemMetricsChart } from "../components/SystemMetricsChart";
+import { KeyboardShortcutsHelp } from "../components/ui/KeyboardShortcutsHelp";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { resetChatSession, updateBotConfig } from "../lib/adminApi";
 
-type Tab = "admin" | "chat" | "agents" | "dashboard";
+type Tab = "admin" | "chat" | "agents" | "dashboard" | "costs";
+
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 0) return "just now";
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds} seconds ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "1 hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
 
 function BotSettingsPanel({ token }: { token: string }) {
   const { botName, refetch } = useBotName();
@@ -84,6 +111,57 @@ export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("admin");
   const [chatSessionKey, setChatSessionKey] = useState(0);
   const { status, invocations, loading, error, connected } = useStatus();
+  const [dailyStats, setDailyStats] = useState<Array<{date: string, cost: number, totalTokens: number}>>([]);
+  const [dailyStatsLoading, setDailyStatsLoading] = useState(true);
+  const [lastActivity, setLastActivity] = useState<string | null>(null);
+
+  useKeyboardShortcuts([
+    { key: "1", ctrl: true, handler: () => setActiveTab("admin") },
+    { key: "2", ctrl: true, handler: () => setActiveTab("chat") },
+    { key: "3", ctrl: true, handler: () => setActiveTab("agents") },
+    { key: "4", ctrl: true, handler: () => setActiveTab("dashboard") },
+    { key: "5", ctrl: true, handler: () => setActiveTab("costs") },
+  ]);
+
+  const fetchDailyStats = useCallback(async () => {
+    try {
+      const headers: HeadersInit = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch("/api/stats/daily", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDailyStats(data);
+        }
+      }
+    } catch {
+      // Non-critical
+    } finally {
+      setDailyStatsLoading(false);
+    }
+  }, [token]);
+
+  const fetchLastActivity = useCallback(async () => {
+    try {
+      const headers: HeadersInit = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch("/api/lifetime-stats", { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.lastUpdatedAt) {
+        setLastActivity(data.lastUpdatedAt);
+      }
+    } catch {
+      // Non-critical
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchDailyStats();
+    fetchLastActivity();
+    const timer = setInterval(fetchLastActivity, 10000);
+    return () => clearInterval(timer);
+  }, [fetchDailyStats, fetchLastActivity]);
 
   const handleReset = async () => {
     if (!token) return;
@@ -111,6 +189,7 @@ export function AdminDashboard() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <KeyboardShortcutsHelp />
             <Link
               to="/"
               className="bg-brutal-white text-brutal-black font-bold uppercase py-2 px-3 md:px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs md:text-sm font-mono"
@@ -126,6 +205,8 @@ export function AdminDashboard() {
           </div>
         </div>
       </header>
+
+      <AlertsBanner />
 
       {/* Tab Navigation */}
       <div className="flex gap-0 mb-6 w-full max-w-full items-center">
@@ -169,8 +250,19 @@ export function AdminDashboard() {
               ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
               : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
           }`}
+          style={{ borderRight: activeTab === "dashboard" ? undefined : "none" }}
         >
           Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab("costs")}
+          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
+            activeTab === "costs"
+              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
+              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
+          }`}
+        >
+          Costs
         </button>
         {activeTab === "chat" && (
           <button
@@ -191,6 +283,10 @@ export function AdminDashboard() {
           <AdminSSLPanel token={token} />
           <AdminSecurityPanel token={token} />
           <BotSettingsPanel token={token} />
+          <SessionsPanel token={token} />
+          <BackupPanel token={token} />
+          <AlertsPanel token={token} />
+          <AuditLogPanel token={token} />
         </div>
       )}
 
@@ -232,13 +328,20 @@ export function AdminDashboard() {
             </div>
           )}
 
+          {/* Last Activity */}
+          {lastActivity && (
+            <div className="bg-brutal-white brutal-border brutal-shadow p-4 mb-6 flex items-center justify-between">
+              <span className="text-xs uppercase font-bold tracking-widest">Last Active</span>
+              <span className="text-lg font-bold">{relativeTime(lastActivity)}</span>
+            </div>
+          )}
+
           {/* Dashboard Grid */}
           {status && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <ServiceCard
                 status={status.service.status}
                 uptime={status.service.uptime}
-                pid={status.service.pid}
                 memory={status.service.memory}
               />
               <SystemCard
@@ -254,8 +357,38 @@ export function AdminDashboard() {
             </div>
           )}
 
+          {/* Cost & Token Trend Chart */}
+          <div className="mt-6">
+            <CostTokenChart data={dailyStats} loading={dailyStatsLoading} />
+          </div>
+
+          {/* Model Breakdown */}
+          <div className="mt-6">
+            <ModelBreakdown />
+          </div>
+
+          {/* System Metrics */}
+          <div className="mt-6">
+            <SystemMetricsChart />
+          </div>
+
           <div className="mt-6 text-center text-xs text-brutal-black/40 uppercase">
             Updated every 3s
+          </div>
+        </div>
+      )}
+
+      {activeTab === "costs" && (
+        <div>
+          <AgentMetricsPanel />
+          <div className="mt-6">
+            <CostCard invocations={invocations} />
+          </div>
+          <div className="mt-6">
+            <CostTokenChart data={dailyStats} loading={dailyStatsLoading} />
+          </div>
+          <div className="mt-6">
+            <ModelBreakdown />
           </div>
         </div>
       )}

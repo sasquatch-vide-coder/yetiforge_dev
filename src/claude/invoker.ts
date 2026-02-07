@@ -229,13 +229,13 @@ function extractResult(data: any): ClaudeResult {
   if (subtype === "error_max_turns") {
     const turns = data.numturns || data.num_turns || "unknown";
     const costStr = costUsd ? ` (cost: $${Number(costUsd).toFixed(2)})` : "";
-    logger.warn({ subtype, turns, sessionId, costUsd }, "extractResult: max turns reached");
+    logger.warn({ subtype, turns, sessionId, costUsd }, "extractResult: max turns reached — marking as ERROR");
     return {
-      result: `The task was too complex to complete in the allowed number of turns (${turns})${costStr}. Try breaking it into smaller steps or continue the conversation.`,
+      result: `FAILED: Hit max turns limit (${turns} turns)${costStr}. The task was not completed — it ran out of allowed turns before finishing.`,
       sessionId,
       costUsd,
       duration,
-      isError: false,
+      isError: true,
     };
   }
 

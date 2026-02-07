@@ -24,16 +24,23 @@ export class ChatAgent {
     cwd: string;
     abortSignal?: AbortSignal;
     onInvocation?: (raw: any) => void;
+    memoryContext?: string;
   }): Promise<{
     chatResponse: string;
     workRequest: WorkRequest | null;
+    memoryNote: string | null;
     claudeResult: ClaudeResult;
   }> {
     const tierConfig = this.agentConfig.getConfig("chat");
     const sessionId = this.sessionManager.getSessionId(opts.chatId, "chat");
 
+    // Inject memory context as prefix to the user prompt
+    const fullPrompt = opts.memoryContext
+      ? `${opts.memoryContext}\n\n---\n\nUser message: ${opts.prompt}`
+      : opts.prompt;
+
     const result = await invokeClaude({
-      prompt: opts.prompt,
+      prompt: fullPrompt,
       cwd: opts.cwd,
       sessionId,
       abortSignal: opts.abortSignal,
@@ -50,44 +57,63 @@ export class ChatAgent {
       this.sessionManager.set(opts.chatId, result.sessionId, opts.cwd, "chat");
     }
 
-    // Parse response for action blocks
+    // Parse response for action blocks and memory blocks
     const parsed = parseChatResponse(result.result);
 
     logger.info({
       chatId: opts.chatId,
       hasAction: !!parsed.action,
+      hasMemory: !!parsed.memoryNote,
       responseLength: parsed.chatText.length,
     }, "Chat agent response parsed");
 
     return {
       chatResponse: parsed.chatText,
       workRequest: parsed.action,
+      memoryNote: parsed.memoryNote,
       claudeResult: result,
     };
   }
 }
 
-function parseChatResponse(text: string): ChatAgentResponse {
+interface ParsedChatResponse extends ChatAgentResponse {
+  memoryNote: string | null;
+}
+
+function parseChatResponse(text: string): ParsedChatResponse {
   const actionRegex = /<RUMPBOT_ACTION>([\s\S]*?)<\/RUMPBOT_ACTION>/;
-  const match = text.match(actionRegex);
+  const memoryRegex = /<TIFFBOT_MEMORY>([\s\S]*?)<\/TIFFBOT_MEMORY>/;
 
-  if (!match) {
-    return { chatText: text, action: null };
-  }
+  // Parse action block
+  const actionMatch = text.match(actionRegex);
+  let action: WorkRequest | null = null;
 
-  // Extract chat text (everything outside the action block)
-  const chatText = text.replace(actionRegex, "").trim();
-
-  try {
-    const action = JSON.parse(match[1].trim()) as WorkRequest;
-    // Validate the action has required fields
-    if (action.type !== "work_request" || !action.task) {
-      logger.warn({ action }, "Invalid action block from chat agent, ignoring");
-      return { chatText: text, action: null };
+  if (actionMatch) {
+    try {
+      const parsed = JSON.parse(actionMatch[1].trim()) as WorkRequest;
+      if (parsed.type === "work_request" && parsed.task) {
+        action = parsed;
+      } else {
+        logger.warn({ action: parsed }, "Invalid action block from chat agent, ignoring");
+      }
+    } catch (err) {
+      logger.warn({ err, raw: actionMatch[1] }, "Failed to parse action block JSON");
     }
-    return { chatText: chatText || "Working on it...", action };
-  } catch (err) {
-    logger.warn({ err, raw: match[1] }, "Failed to parse action block JSON");
-    return { chatText: text, action: null };
   }
+
+  // Parse memory block
+  const memoryMatch = text.match(memoryRegex);
+  const memoryNote = memoryMatch ? memoryMatch[1].trim() : null;
+
+  // Strip both blocks from chat text
+  const chatText = text
+    .replace(actionRegex, "")
+    .replace(memoryRegex, "")
+    .trim();
+
+  return {
+    chatText: chatText || "Working on it...",
+    action,
+    memoryNote,
+  };
 }

@@ -11,6 +11,10 @@ import { InvocationLogger } from "./status/invocation-logger.js";
 import { ChatAgent } from "./agents/chat-agent.js";
 import { Orchestrator } from "./agents/orchestrator.js";
 import { AgentConfigManager } from "./agents/agent-config.js";
+import { PendingResponseManager } from "./pending-responses.js";
+import { MemoryManager } from "./memory-manager.js";
+import { CronManager } from "./cron-manager.js";
+import { WebhookManager } from "./webhook-manager.js";
 import { logger } from "./utils/logger.js";
 
 export function createBot(
@@ -21,6 +25,10 @@ export function createBot(
   chatAgent: ChatAgent,
   orchestrator: Orchestrator,
   agentConfig: AgentConfigManager,
+  pendingResponses?: PendingResponseManager,
+  memoryManager?: MemoryManager,
+  cronManager?: CronManager,
+  webhookManager?: WebhookManager,
 ): Bot {
   const bot = new Bot(config.telegramBotToken);
   const chatLocks = new ChatLocks();
@@ -36,12 +44,16 @@ export function createBot(
   // Rate limit middleware
   bot.use(rateLimitMiddleware(chatLocks));
 
-  // Register commands (pass orchestrator + registry for /kill and /retry support)
-  registerCommands(bot, config, sessionManager, projectManager, chatLocks, agentConfig, orchestrator, orchestrator.getRegistry());
+  // Register commands (pass all managers for new commands)
+  registerCommands(
+    bot, config, sessionManager, projectManager, chatLocks, agentConfig,
+    orchestrator, orchestrator.getRegistry(),
+    memoryManager, cronManager, webhookManager, chatAgent,
+  );
 
   // Default message handler
   bot.on("message:text", (ctx) =>
-    handleMessage(ctx, config, sessionManager, projectManager, chatLocks, invocationLogger, chatAgent, orchestrator)
+    handleMessage(ctx, config, sessionManager, projectManager, chatLocks, invocationLogger, chatAgent, orchestrator, pendingResponses, memoryManager)
   );
 
   return bot;

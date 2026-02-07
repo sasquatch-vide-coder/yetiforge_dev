@@ -35,12 +35,16 @@ export interface OrchestratorSummary {
   summary: string;
   workerResults: WorkerResult[];
   totalCostUsd: number;
+  /** Set to true if any worker indicates a service restart is needed */
+  needsRestart?: boolean;
 }
 
 export interface StatusUpdate {
   type: "status" | "plan_breakdown" | "worker_complete";
   message: string;
   progress?: string;
+  /** If true, send as a NEW Telegram message (user gets notification). Otherwise, edit the status message in-place. */
+  important?: boolean;
 }
 
 export interface ChatAgentResponse {

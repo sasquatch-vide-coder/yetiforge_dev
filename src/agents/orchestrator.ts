@@ -19,6 +19,31 @@ const MAX_WORKERS = 10;
 const STATUS_UPDATE_INTERVAL_MS = 5000; // Rate-limit status updates to 1 per 5s
 const HEARTBEAT_INTERVAL_MS = 60000; // 60 seconds between heartbeats
 const STALL_WARNING_MS = 120000; // 2 minutes of no output = stall warning
+const STALL_KILL_MS = 300000; // 5 minutes of no output = kill the worker
+const WORKER_TIMEOUT_MS = 300000; // 5 minutes max per worker
+const ORCHESTRATION_TIMEOUT_MS = 3600000; // 60 minutes max for entire orchestration
+const MAX_RESULT_CHARS = 8000; // 8KB result truncation for summary context
+const MAX_RETRIES = 1; // Number of automatic retries for transient failures
+
+// Transient errors that warrant automatic retry
+const TRANSIENT_ERROR_PATTERNS = [
+  "rate limit",
+  "429",
+  "timed out",
+  "timeout",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "socket hang up",
+  "network error",
+  "overloaded",
+  "503",
+  "502",
+];
+
+function isTransientError(errorMsg: string): boolean {
+  const lower = errorMsg.toLowerCase();
+  return TRANSIENT_ERROR_PATTERNS.some((p) => lower.includes(p.toLowerCase()));
+}
 
 export class Orchestrator {
   private workerAgent: WorkerAgent;
@@ -52,6 +77,7 @@ export class Orchestrator {
   }): Promise<OrchestratorSummary> {
     const tierConfig = this.agentConfig.getConfig("orchestrator");
     const systemPrompt = buildOrchestratorSystemPrompt();
+    const orchestrationStartTime = Date.now();
 
     logger.info({ chatId: opts.chatId, task: opts.workRequest.task }, "Orchestrator starting");
 
@@ -62,6 +88,34 @@ export class Orchestrator {
       description: opts.workRequest.task,
       phase: "planning",
     });
+
+    // Orchestration-level timeout — prevents runaway cost
+    const orchAbort = new AbortController();
+    let orchTimedOut = false;
+    const orchTimeout = setTimeout(() => {
+      orchTimedOut = true;
+      orchAbort.abort();
+      logger.error({ chatId: opts.chatId, orchId, elapsed: Date.now() - orchestrationStartTime },
+        "Orchestration timeout — aborting all work");
+      opts.onStatusUpdate?.({
+        type: "status",
+        message: `⛔ Orchestration timed out after ${formatDuration(ORCHESTRATION_TIMEOUT_MS)}. Aborting remaining work.`,
+        important: true,
+      });
+    }, ORCHESTRATION_TIMEOUT_MS);
+
+    // Link main abort signal to our orchestration controller
+    const onMainAbort = () => orchAbort.abort();
+    if (opts.abortSignal) {
+      if (opts.abortSignal.aborted) {
+        orchAbort.abort();
+      } else {
+        opts.abortSignal.addEventListener("abort", onMainAbort, { once: true });
+      }
+    }
+
+    // Use orchAbort.signal for all downstream operations
+    const effectiveSignal = orchAbort.signal;
 
     // Rate-limited status update sender
     let lastStatusTime = 0;
@@ -88,21 +142,18 @@ export class Orchestrator {
     sendStatus({ type: "status", message: "Planning the work..." });
 
     // Planning phase: always start fresh, no tools (pure planner), limited turns
-    // The orchestrator must NOT have tools — if it has tools + 50 turns, it will
-    // act as a full agent (reading files, running commands) and output prose summaries
-    // instead of a JSON plan. Disabling tools forces pure JSON output.
     const planResult = await invokeClaude({
       prompt: planPrompt,
       cwd: opts.cwd,
-      sessionId: undefined, // No session for planning — must be stateless
-      abortSignal: opts.abortSignal,
+      sessionId: undefined,
+      abortSignal: effectiveSignal,
       config: this.config,
       onInvocation: opts.onInvocation,
       systemPrompt,
       model: tierConfig.model,
-      maxTurnsOverride: 1, // Planning is a single turn — just output JSON
+      maxTurnsOverride: 1,
       timeoutMsOverride: tierConfig.timeoutMs,
-      allowedTools: "", // No tools — orchestrator is a pure planner, not an executor
+      allowedTools: "",
     });
 
     // Parse the plan
@@ -111,6 +162,8 @@ export class Orchestrator {
       plan = parsePlan(planResult.result);
     } catch (err: any) {
       logger.error({ err, raw: planResult.result }, "Failed to parse orchestrator plan");
+      clearTimeout(orchTimeout);
+      opts.abortSignal?.removeEventListener("abort", onMainAbort);
       this.registry.complete(orchId, false, planResult.costUsd);
       return {
         type: "summary",
@@ -144,65 +197,80 @@ export class Orchestrator {
       description: `${opts.workRequest.task} — ${plan.summary}`,
     });
 
-    // Send full plan breakdown to user
-    const modeIcon = plan.sequential ? "⏬" : "⏩";
+    // Send short plan breakdown to user
     const modeLabel = plan.sequential ? "Sequential" : "Parallel";
     const planBreakdown = [
-      `📋 *Plan:* ${plan.summary}`,
-      ``,
-      `${modeIcon} *Mode:* ${modeLabel}`,
-      ``,
-      ...plan.workers.map((w, i) => {
-        const deps = w.dependsOn?.length ? ` (after: ${w.dependsOn.join(", ")})` : "";
-        return `🔧 *${i + 1}.* ${w.description}${deps}`;
-      }),
-      ``,
-      `📊 ${plan.workers.length} worker(s) total`,
+      `📋 Plan: ${plan.summary}`,
+      `⚙️ ${modeLabel} — ${plan.workers.length} workers`,
+      ...plan.workers.map((w, i) => `${i + 1}. ${w.description}`),
     ].join("\n");
 
-    // Force-send plan breakdown (bypass rate limiter)
+    // Force-send plan breakdown as a NEW message (user gets notification)
     opts.onStatusUpdate?.({
       type: "plan_breakdown",
       message: planBreakdown,
       progress: `0/${plan.workers.length} tasks`,
+      important: true,
     });
 
-    sendStatus({
-      type: "status",
-      message: `Plan: ${plan.summary}`,
-      progress: `0/${plan.workers.length} tasks`,
-    });
+    // Build plan context string for worker awareness
+    const planContextForWorkers = [
+      `## Overall Plan Context`,
+      `Overall goal: ${opts.workRequest.task}`,
+      `Plan summary: ${plan.summary}`,
+      `Total workers: ${plan.workers.length} (${modeLabel.toLowerCase()} execution)`,
+      ``,
+      `### All tasks in this plan:`,
+      ...plan.workers.map((w, i) => `${i + 1}. [${w.id}] ${w.description}`),
+    ].join("\n");
 
     // Phase 2: Execute workers
     const workerResults: WorkerResult[] = [];
     let completedCount = 0;
     const totalWorkers = plan.workers.length;
+    let failFastTriggered = false;
 
-    // Helper: truncate result output to ~10 lines for status summaries
-    const truncateResult = (text: string, maxLines = 10): string => {
-      const lines = text.split("\n");
-      if (lines.length <= maxLines) return text;
-      return lines.slice(0, maxLines).join("\n") + `\n... (${lines.length - maxLines} more lines)`;
+    // Helper: build context injection for a worker (prior results + plan context)
+    const buildWorkerContextPrefix = (
+      workerNumber: number,
+      priorResults: WorkerResult[],
+    ): string => {
+      const parts: string[] = [planContextForWorkers];
+
+      parts.push(`\nYou are Worker #${workerNumber} of ${totalWorkers}.`);
+
+      if (priorResults.length > 0) {
+        parts.push(`\n## Results from prior workers:`);
+        for (const pr of priorResults) {
+          const statusLabel = pr.success ? "SUCCESS" : "FAILED";
+          const truncated = pr.result.length > MAX_RESULT_CHARS
+            ? pr.result.slice(0, MAX_RESULT_CHARS) + `\n... (truncated, ${pr.result.length - MAX_RESULT_CHARS} chars omitted)`
+            : pr.result;
+          parts.push(`\n--- ${pr.taskId} [${statusLabel}] ---`);
+          parts.push(truncated);
+        }
+        parts.push(`\nUse the above results to inform your work. Do not repeat work already done.`);
+      }
+
+      return parts.join("\n");
     };
 
-    // Helper: run a single worker with heartbeat + stall detection + registry tracking
+    // Helper: run a single worker with heartbeat + stall detection + registry tracking + timeout
     const executeWithMonitoring = (task: WorkerTask, workerNumber: number): Promise<WorkerResult> => {
       return new Promise((resolve) => {
         const startTime = Date.now();
         let lastActivityTime = Date.now();
         let stallWarned = false;
 
-        // Create a per-worker AbortController linked to the main one
+        // Create a per-worker AbortController linked to the orchestration controller
         const workerAbort = new AbortController();
 
-        // If the main orchestration signal aborts, abort this worker too
-        const onMainAbort = () => workerAbort.abort();
-        if (opts.abortSignal) {
-          if (opts.abortSignal.aborted) {
-            workerAbort.abort();
-          } else {
-            opts.abortSignal.addEventListener("abort", onMainAbort, { once: true });
-          }
+        // If orchestration signal aborts, abort this worker too
+        const onOrchAbort = () => workerAbort.abort();
+        if (effectiveSignal.aborted) {
+          workerAbort.abort();
+        } else {
+          effectiveSignal.addEventListener("abort", onOrchAbort, { once: true });
         }
 
         // Register worker in registry
@@ -222,13 +290,23 @@ export class Orchestrator {
           workerNumber,
         });
 
+        // Per-worker timeout
+        const workerTimeout = setTimeout(() => {
+          logger.warn({ taskId: task.id, workerNumber, elapsed: Date.now() - startTime },
+            "Worker timeout — killing worker");
+          opts.onStatusUpdate?.({
+            type: "status",
+            message: `⏱️ Worker #${workerNumber} "${task.description}" timed out after ${formatDuration(WORKER_TIMEOUT_MS)} — killing`,
+            important: true,
+          });
+          workerAbort.abort();
+        }, WORKER_TIMEOUT_MS);
+
         // Heartbeat: every 60s, update the user that the worker is still running
         const heartbeat = setInterval(() => {
           const elapsed = Date.now() - startTime;
           const elapsedStr = formatDuration(elapsed);
-          // Update registry with activity
           this.registry.update(workerId, { lastActivityAt: Date.now() });
-          // Force-send (bypass rate limiter) for heartbeats
           opts.onStatusUpdate?.({
             type: "status",
             message: `⏳ Worker "${task.description}" still running (${elapsedStr} elapsed)`,
@@ -239,6 +317,8 @@ export class Orchestrator {
         // Stall detection: check every 30s if output has gone silent
         const stallCheck = setInterval(() => {
           const silentFor = Date.now() - lastActivityTime;
+
+          // Stage 1: Warning at STALL_WARNING_MS
           if (silentFor >= STALL_WARNING_MS && !stallWarned) {
             stallWarned = true;
             const silentMin = Math.round(silentFor / 60000);
@@ -249,14 +329,28 @@ export class Orchestrator {
             });
             logger.warn({ taskId: task.id, silentForMs: silentFor }, "Worker may be stalled");
           }
+
+          // Stage 2: Kill at STALL_KILL_MS
+          if (silentFor >= STALL_KILL_MS) {
+            const silentMin = Math.round(silentFor / 60000);
+            logger.error({ taskId: task.id, silentForMs: silentFor },
+              "Worker stalled — killing after prolonged silence");
+            opts.onStatusUpdate?.({
+              type: "status",
+              message: `💀 Worker "${task.description}" killed after ${silentMin} minutes of silence`,
+              progress: `${completedCount}/${totalWorkers} tasks done`,
+              important: true,
+            });
+            workerAbort.abort();
+          }
         }, 30000);
 
-        // Activity tracker — called by invoker whenever stdout/stderr produces output
+        // Activity tracker
         const onActivity = () => {
           lastActivityTime = Date.now();
           this.registry.update(workerId, { lastActivityAt: Date.now() });
           if (stallWarned) {
-            stallWarned = false; // Reset stall warning if activity resumes
+            stallWarned = false;
             opts.onStatusUpdate?.({
               type: "status",
               message: `Worker "${task.description}" is active again`,
@@ -265,9 +359,16 @@ export class Orchestrator {
           }
         };
 
-        // Output tracker — feeds raw output chunks to the agent registry
+        // Output tracker
         const onOutput = (chunk: string) => {
           this.registry.addOutput(workerId, chunk);
+        };
+
+        const cleanup = () => {
+          clearInterval(heartbeat);
+          clearInterval(stallCheck);
+          clearTimeout(workerTimeout);
+          effectiveSignal.removeEventListener("abort", onOrchAbort);
         };
 
         this.workerAgent
@@ -275,38 +376,84 @@ export class Orchestrator {
             task,
             cwd: opts.cwd,
             abortSignal: workerAbort.signal,
-            onInvocation: opts.onInvocation,
+            onInvocation: (raw: any) => {
+              if (raw && typeof raw === 'object') {
+                if (Array.isArray(raw)) {
+                  const entry = raw.find((item: any) => item.type === 'result') || raw[0];
+                  if (entry) entry._tier = 'worker';
+                } else {
+                  raw._tier = 'worker';
+                }
+              }
+              opts.onInvocation?.(raw);
+            },
             onActivity,
             onOutput,
           })
           .then((result) => {
-            clearInterval(heartbeat);
-            clearInterval(stallCheck);
-            opts.abortSignal?.removeEventListener("abort", onMainAbort);
+            cleanup();
             this.registry.complete(workerId, result.success, result.costUsd);
             this.registry.removeWorkerAbortController(orchId, workerId);
             resolve(result);
           })
           .catch((err) => {
-            clearInterval(heartbeat);
-            clearInterval(stallCheck);
-            opts.abortSignal?.removeEventListener("abort", onMainAbort);
-            const wasKilled = workerAbort.signal.aborted && !opts.abortSignal?.aborted;
+            cleanup();
+            const wasKilled = workerAbort.signal.aborted && !effectiveSignal.aborted;
+            const wasTimedOut = err.message?.includes("timed out");
             this.registry.complete(workerId, false);
-            // Don't remove the abort info so /retry can look it up
             resolve({
               taskId: task.id,
               success: false,
-              result: wasKilled ? "Worker killed by user" : `Worker error: ${err.message}`,
+              result: wasKilled
+                ? "Worker killed by user"
+                : wasTimedOut
+                  ? `Worker timed out after ${formatDuration(WORKER_TIMEOUT_MS)}`
+                  : `Worker error: ${err.message}`,
               duration: Date.now() - startTime,
             });
           });
       });
     };
 
+    // Helper: execute a worker with automatic retry for transient failures
+    const executeWithRetry = async (task: WorkerTask, workerNumber: number): Promise<WorkerResult> => {
+      let result = await executeWithMonitoring(task, workerNumber);
+
+      // If failed and it's a transient error, retry once
+      if (!result.success && isTransientError(result.result)) {
+        logger.info({ taskId: task.id, workerNumber, error: result.result },
+          "Worker hit transient error — retrying (attempt 2)");
+        opts.onStatusUpdate?.({
+          type: "status",
+          message: `🔄 Worker #${workerNumber} "${task.description}" hit transient error, retrying...`,
+          progress: `${completedCount}/${totalWorkers} tasks done`,
+          important: true,
+        });
+
+        // Brief delay before retry
+        await new Promise((r) => setTimeout(r, 3000));
+
+        // Retry with a new task ID
+        const retryTask: WorkerTask = {
+          ...task,
+          id: `${task.id}-retry`,
+        };
+        result = await executeWithMonitoring(retryTask, workerNumber);
+
+        if (result.success) {
+          logger.info({ taskId: task.id, workerNumber }, "Worker retry succeeded");
+          opts.onStatusUpdate?.({
+            type: "status",
+            message: `✅ Worker #${workerNumber} retry succeeded`,
+          });
+        }
+      }
+
+      return result;
+    };
+
     // Retry method: re-run a specific worker by its worker number
     const retryWorker = async (workerNumber: number): Promise<WorkerResult | null> => {
-      // Find the worker info in the registry
       const workerInfo = this.registry.getWorkerByNumber(orchId, workerNumber);
       if (!workerInfo) return null;
 
@@ -316,7 +463,6 @@ export class Orchestrator {
         prompt: workerInfo.info.taskPrompt,
       };
 
-      // Remove the old abort controller entry
       this.registry.removeWorkerAbortController(orchId, workerInfo.workerId);
 
       const result = await executeWithMonitoring(task, workerNumber);
@@ -328,11 +474,18 @@ export class Orchestrator {
     this._activeOrchId = orchId;
 
     if (plan.sequential) {
-      // Run workers one at a time
+      // Run workers one at a time, passing results forward
       for (let idx = 0; idx < plan.workers.length; idx++) {
         const task = plan.workers[idx];
         const workerNumber = idx + 1;
-        if (opts.abortSignal?.aborted) break;
+        if (effectiveSignal.aborted || failFastTriggered) break;
+
+        // Inject context from prior workers into this worker's prompt
+        const contextPrefix = buildWorkerContextPrefix(workerNumber, workerResults);
+        const augmentedTask: WorkerTask = {
+          ...task,
+          prompt: `${contextPrefix}\n\n---\n\n## Your specific task:\n${task.prompt}`,
+        };
 
         sendStatus({
           type: "status",
@@ -340,7 +493,7 @@ export class Orchestrator {
           progress: `${completedCount}/${totalWorkers} tasks done`,
         });
 
-        const result = await executeWithMonitoring(task, workerNumber);
+        const result = await executeWithRetry(augmentedTask, workerNumber);
 
         workerResults.push(result);
         completedCount++;
@@ -348,15 +501,29 @@ export class Orchestrator {
         // Update orchestrator progress in registry
         this.registry.update(orchId, { progress: `${completedCount}/${totalWorkers} tasks` });
 
-        // Immediate per-worker completion update with result summary
+        // Immediate per-worker completion update — new message so user gets notified
         const statusIcon = result.success ? "✅" : "❌";
         const durationStr = result.duration ? ` (${formatDuration(result.duration)})` : "";
-        const resultSummary = truncateResult(result.result);
         opts.onStatusUpdate?.({
           type: "worker_complete",
-          message: `${statusIcon} ${result.success ? "Done" : "Failed"}: ${task.description}${durationStr}\n\n${resultSummary}`,
+          message: `${statusIcon} Done: ${task.description}${durationStr} — ${completedCount}/${totalWorkers} done`,
           progress: `${completedCount}/${totalWorkers} tasks done`,
+          important: true,
         });
+
+        // Fail-fast: if a sequential worker fails, abort remaining workers
+        if (!result.success) {
+          failFastTriggered = true;
+          const remaining = totalWorkers - completedCount;
+          logger.warn({ taskId: task.id, workerNumber, remaining },
+            "Sequential worker failed — aborting remaining workers (fail-fast)");
+          opts.onStatusUpdate?.({
+            type: "status",
+            message: `⛔ Worker #${workerNumber} failed — skipping ${remaining} remaining worker(s)`,
+            progress: `${completedCount}/${totalWorkers} tasks done`,
+            important: true,
+          });
+        }
       }
     } else {
       // Run workers with dependency tracking
@@ -369,7 +536,7 @@ export class Orchestrator {
       plan.workers.forEach((w, i) => workerNumberMap.set(w.id, i + 1));
 
       while (remaining.size > 0) {
-        if (opts.abortSignal?.aborted) break;
+        if (effectiveSignal.aborted || failFastTriggered) break;
 
         // Find tasks whose dependencies are all satisfied
         const ready = plan.workers.filter(
@@ -390,11 +557,28 @@ export class Orchestrator {
           progress: `${completedCount}/${totalWorkers} tasks done`,
         });
 
-        // Run all ready tasks in parallel with monitoring
+        // Inject context from completed dependencies into each ready worker
+        const augmentedTasks = ready.map((task) => {
+          const workerNumber = workerNumberMap.get(task.id)!;
+          // For parallel workers with dependencies, pass only the results they depend on
+          const depResults = (task.dependsOn || [])
+            .map((depId) => resultMap.get(depId))
+            .filter((r): r is WorkerResult => r !== undefined);
+          const contextPrefix = buildWorkerContextPrefix(workerNumber, depResults);
+          return {
+            ...task,
+            prompt: `${contextPrefix}\n\n---\n\n## Your specific task:\n${task.prompt}`,
+          } as WorkerTask;
+        });
+
+        // Run all ready tasks in parallel with monitoring + retry
         const results = await Promise.all(
-          ready.map((task) => executeWithMonitoring(task, workerNumberMap.get(task.id)!))
+          augmentedTasks.map((task, i) =>
+            executeWithRetry(task, workerNumberMap.get(ready[i].id)!)
+          )
         );
 
+        let batchHadFailure = false;
         for (let i = 0; i < ready.length; i++) {
           const task = ready[i];
           const result = results[i];
@@ -407,18 +591,46 @@ export class Orchestrator {
           // Update orchestrator progress in registry
           this.registry.update(orchId, { progress: `${completedCount}/${totalWorkers} tasks` });
 
-          // Immediate per-worker completion update with result summary
+          // Immediate per-worker completion update — new message so user gets notified
           const statusIcon = result.success ? "✅" : "❌";
           const durationStr = result.duration ? ` (${formatDuration(result.duration)})` : "";
-          const resultSummary = truncateResult(result.result);
           opts.onStatusUpdate?.({
             type: "worker_complete",
-            message: `${statusIcon} ${result.success ? "Done" : "Failed"}: ${task.description}${durationStr}\n\n${resultSummary}`,
+            message: `${statusIcon} Done: ${task.description}${durationStr} — ${completedCount}/${totalWorkers} done`,
             progress: `${completedCount}/${totalWorkers} tasks done`,
+            important: true,
           });
+
+          if (!result.success) batchHadFailure = true;
+        }
+
+        // Fail-fast in parallel mode: if any worker in a batch fails and has dependents, abort
+        if (batchHadFailure) {
+          // Check if any remaining workers depend on a failed task
+          const failedIds = new Set(
+            results.filter((r) => !r.success).map((_, i) => ready[i].id)
+          );
+          const blockedWorkers = plan.workers.filter(
+            (w) => remaining.has(w.id) && (w.dependsOn || []).some((dep) => failedIds.has(dep))
+          );
+          if (blockedWorkers.length > 0) {
+            failFastTriggered = true;
+            logger.warn({ failedIds: [...failedIds], blockedCount: blockedWorkers.length },
+              "Parallel worker(s) failed — aborting dependent workers (fail-fast)");
+            opts.onStatusUpdate?.({
+              type: "status",
+              message: `⛔ Worker failure — skipping ${blockedWorkers.length} dependent worker(s)`,
+              progress: `${completedCount}/${totalWorkers} tasks done`,
+              important: true,
+            });
+          }
         }
       }
     }
+
+    // Clear orchestration timeout
+    clearTimeout(orchTimeout);
+    opts.abortSignal?.removeEventListener("abort", onMainAbort);
 
     // Phase 3: Summary — update registry to summarizing phase
     this.registry.update(orchId, { phase: "summarizing" });
@@ -436,10 +648,13 @@ export class Orchestrator {
           `--- Worker: ${r.taskId} ---`,
           `Success: ${r.success}`,
           `Duration: ${r.duration ? Math.round(r.duration / 1000) + "s" : "unknown"}`,
-          `Result: ${r.result.slice(0, 2000)}`, // Truncate long results
+          `Result: ${r.result.slice(0, MAX_RESULT_CHARS)}`,
           ``,
         ].join("\n")
       ),
+      ``,
+      orchTimedOut ? `⚠️ NOTE: The orchestration was aborted due to a timeout (${formatDuration(ORCHESTRATION_TIMEOUT_MS)}). Some workers may not have run.` : "",
+      failFastTriggered ? `⚠️ NOTE: Remaining workers were skipped due to a prior worker failure (fail-fast).` : "",
       ``,
       `Total cost so far: $${totalCostUsd.toFixed(4)}`,
       ``,
@@ -453,32 +668,30 @@ export class Orchestrator {
     let summaryCost = 0;
 
     try {
-      // Summary phase: stateless, no tools needed — just summarizing text
       const summaryResult = await invokeClaude({
         prompt: summaryPrompt,
         cwd: opts.cwd,
-        sessionId: undefined, // No session for summary — stateless
-        abortSignal: opts.abortSignal,
+        sessionId: undefined,
+        abortSignal: opts.abortSignal, // Use original signal for summary (orch timeout already cleared)
         config: this.config,
         onInvocation: opts.onInvocation,
         systemPrompt: "You are a task orchestrator. Summarize the worker results concisely. No personality. Plain text only.",
         model: tierConfig.model,
-        maxTurnsOverride: 1, // Summary is a single turn — just output text
+        maxTurnsOverride: 1,
         timeoutMsOverride: 30000,
-        allowedTools: "", // No tools needed for summarization
+        allowedTools: "",
       });
 
       summaryText = summaryResult.result;
       summaryCost = summaryResult.costUsd || 0;
     } catch (err: any) {
       logger.error({ err }, "Orchestrator summary phase failed");
-      // Fall back to a basic summary
       const successes = workerResults.filter((r) => r.success).length;
       const failures = workerResults.filter((r) => !r.success).length;
       summaryText = `Completed ${successes} task(s) successfully${failures > 0 ? `, ${failures} failed` : ""}. Total cost: $${totalCostUsd.toFixed(4)}.`;
     }
 
-    const overallSuccess = workerResults.every((r) => r.success);
+    const overallSuccess = workerResults.length > 0 && workerResults.every((r) => r.success);
     const finalCost = totalCostUsd + summaryCost;
 
     // Mark orchestrator complete in registry
@@ -494,6 +707,8 @@ export class Orchestrator {
       overallSuccess,
       workerCount: workerResults.length,
       totalCostUsd: finalCost,
+      orchTimedOut,
+      failFastTriggered,
     }, "Orchestrator complete");
 
     return {
@@ -529,13 +744,10 @@ function parsePlan(raw: string): OrchestratorPlan {
   }
 
   // Strategy 3: Find JSON object containing "type":"plan" in mixed prose
-  // This handles cases like "Here's the plan:\n{...}" or "Done! {...}"
   const planTypeIndex = text.indexOf('"type"');
   if (planTypeIndex !== -1) {
-    // Walk backwards from "type" to find the opening brace
     let braceStart = text.lastIndexOf("{", planTypeIndex);
     if (braceStart !== -1) {
-      // Now find the matching closing brace
       let depth = 0;
       for (let i = braceStart; i < text.length; i++) {
         if (text[i] === "{") depth++;
@@ -546,7 +758,6 @@ function parsePlan(raw: string): OrchestratorPlan {
             const plan = JSON.parse(candidate) as OrchestratorPlan;
             return validatePlan(plan);
           } catch {
-            // This brace pair didn't contain valid JSON, continue
             break;
           }
         }

@@ -273,8 +273,24 @@ export class AdminAuth {
     logger.info("Admin password changed");
   }
 
+  // ── Username ──
+
   getUsername(): string | null {
     return this.admin?.username ?? null;
+  }
+
+  async changeUsername(newUsername: string): Promise<void> {
+    if (!this.admin) throw new Error("Admin not set up");
+    const trimmed = newUsername.trim();
+    if (!trimmed) throw new Error("Username cannot be empty");
+    if (trimmed.length < 3) throw new Error("Username must be at least 3 characters");
+    if (trimmed.length > 32) throw new Error("Username must be 32 characters or fewer");
+    if (!/^[a-zA-Z0-9_.-]+$/.test(trimmed)) {
+      throw new Error("Username can only contain letters, numbers, underscores, dots, and hyphens");
+    }
+    this.admin.username = trimmed;
+    await this.save();
+    logger.info({ username: trimmed }, "Admin username changed");
   }
 
   destroy(): void {

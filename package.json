@@ -8,13 +8,14 @@
     "build": "tsc",
     "build:client": "cd status/client && npm run build",
     "build:all": "tsc && cd status/client && npm run build",
+    "deploy:ui": "cd status/client && npm run build && echo 'UI deployed — no restart needed'",
+    "deploy:bot": "tsc && echo 'Bot built — restart tiffbot service to apply'",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.2.0",
-    "@fastify/static": "^9.0.0",
     "@types/node-cron": "^3.0.11",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.6.2",

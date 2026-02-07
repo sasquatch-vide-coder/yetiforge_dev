@@ -5,7 +5,6 @@ export interface Config {
   allowedUserIds: number[];
   defaultProjectDir: string;
   claudeCliPath: string;
-  maxTurns: number;
   claudeTimeoutMs: number;
   dataDir: string;
   adminJwtSecret: string;
@@ -32,9 +31,8 @@ export function loadConfig(): Config {
     defaultProjectDir:
       process.env.DEFAULT_PROJECT_DIR || process.cwd(),
     claudeCliPath: process.env.CLAUDE_CLI_PATH || "claude",
-    maxTurns: parseInt(process.env.MAX_TURNS || "10", 10),
     claudeTimeoutMs: process.env.CLAUDE_TIMEOUT_MS ? parseInt(process.env.CLAUDE_TIMEOUT_MS, 10) : 0,
     dataDir: process.env.DATA_DIR || "./data",
-    adminJwtSecret: process.env.ADMIN_JWT_SECRET || "rumpbot-admin-default-secret",
+    adminJwtSecret: process.env.ADMIN_JWT_SECRET || "yetiforge-admin-default-secret",
   };
 }

@@ -9,7 +9,6 @@ interface LifetimeStats {
   totalCacheReadTokens: number;
   totalCacheCreationTokens: number;
   totalInvocations: number;
-  maxTurnsHits: number;
   firstRecordedAt: string;
   lastUpdatedAt: string;
 }
@@ -122,12 +121,10 @@ export function CostCard({ invocations }: Props) {
   const avgCost = recentCount > 0 ? recentCost / recentCount : 0;
   const totalTurns = invocations.reduce((sum, i) => sum + (i.numTurns || 0), 0);
   const errors = invocations.filter((i) => i.isError).length;
-  const recentMaxTurnsHits = invocations.filter((i) => i.stopReason === "error_max_turns").length;
 
   // Use lifetime stats for "All Time" display, fall back to rolling window
   const allTimeCost = lifetimeStats?.totalCost ?? recentCost;
   const allTimeInvocations = lifetimeStats?.totalInvocations ?? recentCount;
-  const allTimeMaxTurnsHits = lifetimeStats?.maxTurnsHits ?? recentMaxTurnsHits;
   const allTimeInput = lifetimeStats?.totalInputTokens ?? 0;
   const allTimeOutput = lifetimeStats?.totalOutputTokens ?? 0;
   const allTimeCacheRead = lifetimeStats?.totalCacheReadTokens ?? 0;
@@ -159,7 +156,7 @@ export function CostCard({ invocations }: Props) {
   });
 
   const filterBtnClass = (active: boolean) =>
-    `px-2 py-1 text-xs font-bold uppercase font-mono brutal-border transition-all ${
+    `px-2 py-1 text-xs font-bold uppercase font-mono brutal-border transition-all min-h-[44px] touch-manipulation ${
       active
         ? "bg-brutal-black text-brutal-white"
         : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
@@ -186,8 +183,8 @@ export function CostCard({ invocations }: Props) {
           <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
         </div>
         <div className="bg-brutal-orange/20 brutal-border p-3">
-          <div className="text-xs uppercase font-bold">Max Turns Hits</div>
-          <div className="text-2xl font-bold">{allTimeMaxTurnsHits}</div>
+          <div className="text-xs uppercase font-bold">Total Errors</div>
+          <div className="text-2xl font-bold">{errors}</div>
         </div>
       </div>
 
@@ -299,7 +296,8 @@ export function CostCard({ invocations }: Props) {
             </div>
           </div>
 
-          <div className="w-full overflow-x-auto">
+          {/* Desktop table */}
+          <div className="hidden md:block w-full overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-brutal-black text-brutal-white uppercase">
@@ -339,12 +337,10 @@ export function CostCard({ invocations }: Props) {
                         className={`px-1 py-0.5 font-bold ${
                           inv.isError
                             ? "bg-brutal-red text-brutal-white"
-                            : inv.stopReason === "error_max_turns"
-                              ? "bg-brutal-orange text-brutal-white"
-                              : "bg-brutal-green text-brutal-black"
+                            : "bg-brutal-green text-brutal-black"
                         }`}
                       >
-                        {inv.isError ? "ERR" : inv.stopReason === "error_max_turns" ? "MAX" : "OK"}
+                        {inv.isError ? "ERR" : "OK"}
                       </span>
                     </td>
                   </tr>
@@ -352,6 +348,44 @@ export function CostCard({ invocations }: Props) {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile card layout */}
+          <div className="md:hidden space-y-3">
+            {filteredInvocations.slice(0, 20).map((inv, i) => (
+              <div
+                key={i}
+                className="bg-brutal-bg brutal-border p-3 space-y-1"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-brutal-black/60">
+                    {timeAgo(inv.timestamp)}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 font-bold text-xs ${
+                      inv.isError
+                        ? "bg-brutal-red text-brutal-white"
+                        : "bg-brutal-green text-brutal-black"
+                    }`}
+                  >
+                    {inv.isError ? "ERR" : "OK"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="uppercase text-brutal-black/60 font-bold">
+                    {inv.tier ? inv.tier.slice(0, 5) : "—"}
+                  </span>
+                  <span className="text-brutal-black/70 truncate max-w-[150px]">
+                    {extractPrimaryModel(inv.modelUsage)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span>{inv.numTurns || 0} turns &middot; {((inv.durationMs || 0) / 1000).toFixed(1)}s</span>
+                  <span className="font-bold">${(inv.costUsd || 0).toFixed(2)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {filteredInvocations.length === 0 && (
             <div className="text-center text-xs text-brutal-black/40 py-3 uppercase">
               No invocations match filters

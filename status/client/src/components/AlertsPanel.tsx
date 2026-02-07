@@ -85,86 +85,141 @@ export function AlertsPanel({ token }: Props) {
   };
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <h2 className="text-xl font-bold uppercase mb-4 font-mono">Alerts</h2>
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4">
+      <h2 className="text-sm font-bold uppercase mb-2 font-mono">Alerts</h2>
 
       {error && (
-        <p className="font-mono text-sm text-brutal-red mb-2">{error}</p>
+        <p className="font-mono text-[10px] text-brutal-red mb-1">{error}</p>
       )}
 
       {loading ? (
-        <p className="text-sm font-mono text-brutal-black/50 uppercase">Loading alerts...</p>
+        <p className="text-xs font-mono text-brutal-black/50 uppercase">Loading alerts...</p>
       ) : alerts.length === 0 ? (
-        <p className="text-sm font-mono text-brutal-black/50 uppercase py-4 text-center">
+        <p className="text-xs font-mono text-brutal-black/50 uppercase py-2 text-center">
           No alerts
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm font-mono">
-            <thead>
-              <tr className="bg-brutal-black text-brutal-white uppercase">
-                <th className="text-left p-2">Time</th>
-                <th className="text-left p-2">Type</th>
-                <th className="text-left p-2">Severity</th>
-                <th className="text-left p-2">Message</th>
-                <th className="text-left p-2">Status</th>
-                <th className="text-left p-2">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {alerts.map((alert, i) => (
-                <tr
-                  key={alert.id}
-                  className={`${i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"} ${
-                    alert.acknowledged ? "opacity-50" : ""
-                  }`}
-                >
-                  <td className="p-2 whitespace-nowrap">{formatTime(alert.timestamp)}</td>
-                  <td className="p-2">
-                    <span
-                      className={`px-2 py-0.5 font-bold text-xs uppercase font-mono ${
-                        TYPE_COLORS[alert.type] || "bg-brutal-black text-brutal-white"
-                      }`}
-                    >
-                      {alert.type.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="p-2">
-                    <span
-                      className={`px-2 py-0.5 font-bold text-xs uppercase font-mono ${
-                        SEVERITY_COLORS[alert.severity] || "bg-brutal-black text-brutal-white"
-                      }`}
-                    >
-                      {alert.severity}
-                    </span>
-                  </td>
-                  <td className="p-2">{alert.message}</td>
-                  <td className="p-2">
-                    <span
-                      className={`px-2 py-0.5 font-bold text-xs uppercase font-mono ${
-                        alert.acknowledged
-                          ? "bg-brutal-bg text-brutal-black/50"
-                          : "bg-brutal-green text-brutal-black"
-                      }`}
-                    >
-                      {alert.acknowledged ? "Acknowledged" : "Active"}
-                    </span>
-                  </td>
-                  <td className="p-2">
-                    {!alert.acknowledged && (
-                      <button
-                        onClick={() => handleAcknowledge(alert.id)}
-                        className="bg-brutal-black text-brutal-white font-bold uppercase py-1 px-2 brutal-border text-xs font-mono hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none brutal-shadow transition-all"
-                      >
-                        Ack
-                      </button>
-                    )}
-                  </td>
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-[10px] font-mono">
+              <thead>
+                <tr className="bg-brutal-black text-brutal-white uppercase">
+                  <th className="text-left px-1.5 py-0.5">Time</th>
+                  <th className="text-left px-1.5 py-0.5">Type</th>
+                  <th className="text-left px-1.5 py-0.5">Severity</th>
+                  <th className="text-left px-1.5 py-0.5">Message</th>
+                  <th className="text-left px-1.5 py-0.5">Status</th>
+                  <th className="text-left px-1.5 py-0.5">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {alerts.map((alert, i) => (
+                  <tr
+                    key={alert.id}
+                    className={`${i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"} ${
+                      alert.acknowledged ? "opacity-50" : ""
+                    }`}
+                  >
+                    <td className="px-1.5 py-0.5 whitespace-nowrap">{formatTime(alert.timestamp)}</td>
+                    <td className="px-1.5 py-0.5">
+                      <span
+                        className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                          TYPE_COLORS[alert.type] || "bg-brutal-black text-brutal-white"
+                        }`}
+                      >
+                        {alert.type.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-0.5">
+                      <span
+                        className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                          SEVERITY_COLORS[alert.severity] || "bg-brutal-black text-brutal-white"
+                        }`}
+                      >
+                        {alert.severity}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-0.5">{alert.message}</td>
+                    <td className="px-1.5 py-0.5">
+                      <span
+                        className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                          alert.acknowledged
+                            ? "bg-brutal-bg text-brutal-black/50"
+                            : "bg-brutal-green text-brutal-black"
+                        }`}
+                      >
+                        {alert.acknowledged ? "Ack'd" : "Active"}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-0.5">
+                      {!alert.acknowledged && (
+                        <button
+                          onClick={() => handleAcknowledge(alert.id)}
+                          className="bg-brutal-black text-brutal-white font-bold uppercase py-0.5 px-2 brutal-border text-[10px] font-mono hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none brutal-shadow transition-all"
+                        >
+                          Ack
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile card layout */}
+          <div className="md:hidden space-y-2">
+            {alerts.map((alert) => (
+              <div
+                key={alert.id}
+                className={`bg-brutal-bg brutal-border p-2 space-y-1 ${
+                  alert.acknowledged ? "opacity-50" : ""
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                      TYPE_COLORS[alert.type] || "bg-brutal-black text-brutal-white"
+                    }`}
+                  >
+                    {alert.type.replace(/_/g, " ")}
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                      SEVERITY_COLORS[alert.severity] || "bg-brutal-black text-brutal-white"
+                    }`}
+                  >
+                    {alert.severity}
+                  </span>
+                </div>
+                <p className="text-[10px] font-mono">{alert.message}</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-brutal-black/60">
+                    {formatTime(alert.timestamp)}
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 font-bold text-[10px] uppercase font-mono ${
+                      alert.acknowledged
+                        ? "bg-brutal-bg text-brutal-black/50"
+                        : "bg-brutal-green text-brutal-black"
+                    }`}
+                  >
+                    {alert.acknowledged ? "Ack'd" : "Active"}
+                  </span>
+                </div>
+                {!alert.acknowledged && (
+                  <button
+                    onClick={() => handleAcknowledge(alert.id)}
+                    className="w-full bg-brutal-black text-brutal-white font-bold uppercase py-1.5 px-3 brutal-border text-xs font-mono hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none brutal-shadow transition-all"
+                  >
+                    Acknowledge
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

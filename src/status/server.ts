@@ -1,9 +1,8 @@
 import Fastify from "fastify";
-import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { readFile, stat } from "fs/promises";
+import { readFile } from "fs/promises";
 import { execSync, exec } from "child_process";
 import { logger } from "../utils/logger.js";
 import { AdminAuth } from "../admin/auth.js";
@@ -37,14 +36,14 @@ interface ProjectsData {
   activeProject: Record<string, string>;
 }
 
-function getServiceStatus(): {
+function getServiceStatusByName(serviceName: string): {
   status: string;
   uptime: string | null;
   pid: number | null;
   memory: string | null;
 } {
   try {
-    const raw = execSync("systemctl show tiffbot --no-pager", {
+    const raw = execSync(`systemctl show ${serviceName} --no-pager`, {
       encoding: "utf-8",
     });
     const props: Record<string, string> = {};
@@ -84,6 +83,14 @@ function getServiceStatus(): {
   } catch {
     return { status: "unknown", uptime: null, pid: null, memory: null };
   }
+}
+
+function getServiceStatus() {
+  return getServiceStatusByName("tiffbot");
+}
+
+function getNginxStatus() {
+  return getServiceStatusByName("nginx");
 }
 
 function getSystemInfo(): {
@@ -191,7 +198,7 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
   await app.register(fastifyCors, { origin: true });
 
   // Admin auth
-  const adminAuth = new AdminAuth(dataDir, config?.adminJwtSecret || "rumpbot-admin-default-secret");
+  const adminAuth = new AdminAuth(dataDir, config?.adminJwtSecret || "yetiforge-admin-default-secret");
   await adminAuth.load();
 
   // Web chat persistence
@@ -221,17 +228,7 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
     webChatStore,
   }, config?.botConfigManager);
 
-  // Serve built React app
-  const clientDist = join(__dirname, "../../status/client/dist");
-  try {
-    await stat(clientDist);
-    await app.register(fastifyStatic, {
-      root: clientDist,
-      prefix: "/",
-    });
-  } catch {
-    logger.warn("Status client dist not found, API-only mode");
-  }
+  // UI static files are now served directly by Nginx — Fastify is API-only
 
   // Auth middleware for API routes
   const requireAuth = async (request: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
@@ -256,8 +253,9 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
 
   // API routes (all require auth)
   app.get("/api/status", { preHandler: requireAuth }, async () => {
-    const [service, system, sessions, projects] = await Promise.all([
+    const [tiffbotStatus, nginxStatus, system, sessions, projects] = await Promise.all([
       getServiceStatus(),
+      getNginxStatus(),
       getSystemInfo(),
       getSessions(dataDir),
       getProjects(dataDir),
@@ -271,7 +269,11 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
 
     return {
       timestamp: Date.now(),
-      service,
+      service: tiffbotStatus,
+      services: {
+        tiffbot: tiffbotStatus,
+        nginx: nginxStatus,
+      },
       system,
       bot: {
         sessionCount,
@@ -585,7 +587,6 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
       for (const tier of ["chat", "executor"] as const) {
         if (data[tier]) {
           if (data[tier].model) config.agentConfig.setModel(tier, data[tier].model);
-          if (data[tier].maxTurns !== undefined) config.agentConfig.setMaxTurns(tier, data[tier].maxTurns);
           if (data[tier].timeoutMs !== undefined) config.agentConfig.setTimeoutMs(tier, data[tier].timeoutMs);
         }
       }
@@ -642,7 +643,7 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
   // ── Config Export/Import ──
   app.get("/api/admin/config/export", { preHandler: requireAuth }, async () => {
     const agentData = config?.agentConfig?.getAll() || {};
-    const botData = { botName: config?.botConfigManager?.getBotName() || "TIFFBOT" };
+    const botData = { botName: config?.botConfigManager?.getBotName() || "YETIFORGE" };
 
     let telegramData: any = {};
     try {
@@ -677,7 +678,6 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
       for (const tier of ["chat", "executor"] as const) {
         if (ac[tier]) {
           if (ac[tier].model) config.agentConfig.setModel(tier, ac[tier].model);
-          if (ac[tier].maxTurns !== undefined) config.agentConfig.setMaxTurns(tier, ac[tier].maxTurns);
           if (ac[tier].timeoutMs !== undefined) config.agentConfig.setTimeoutMs(tier, ac[tier].timeoutMs);
         }
       }
@@ -773,20 +773,10 @@ export async function startStatusServer(dataDir: string, port: number = 3069, co
     registerAgentRoutes(app, config.agentRegistry, requireAuth);
   }
 
-  // SPA fallback - serve index.html for non-API routes
+  // API-only 404 handler (UI is served by Nginx)
   app.setNotFoundHandler(async (request, reply) => {
-    if (request.url.startsWith("/api/")) {
-      reply.code(404);
-      return { error: "Not found" };
-    }
-    try {
-      const indexPath = join(clientDist, "index.html");
-      const html = await readFile(indexPath, "utf-8");
-      reply.type("text/html").send(html);
-    } catch {
-      reply.code(404);
-      return { error: "Client not built" };
-    }
+    reply.code(404);
+    return { error: "Not found" };
   });
 
   await app.listen({ port, host: "0.0.0.0" });

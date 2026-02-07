@@ -11,7 +11,6 @@ const SHORTCUTS: ShortcutInfo[] = [
   { keys: "Ctrl + 2", description: "Switch to Chat tab" },
   { keys: "Ctrl + 3", description: "Switch to Agents tab" },
   { keys: "Ctrl + 4", description: "Switch to Dashboard tab" },
-  { keys: "Ctrl + 5", description: "Switch to Costs tab" },
   { keys: "Ctrl + /", description: "Focus chat input" },
   { keys: "Escape", description: "Close dialog / cancel" },
 ];

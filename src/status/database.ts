@@ -32,7 +32,6 @@ export interface InvocationStats {
   totalCacheReadTokens: number;
   totalCacheCreationTokens: number;
   totalInvocations: number;
-  maxTurnsHits: number;
   firstRecordedAt: string;
   lastUpdatedAt: string;
 }
@@ -186,7 +185,6 @@ export function getInvocationStats(dataDir?: string): InvocationStats {
       COALESCE(SUM(outputTokens), 0) as totalOutputTokens,
       COALESCE(SUM(cacheReadTokens), 0) as totalCacheReadTokens,
       COALESCE(SUM(cacheCreationTokens), 0) as totalCacheCreationTokens,
-      COUNT(CASE WHEN stopReason LIKE '%max%' THEN 1 END) as maxTurnsHits,
       MIN(timestamp) as firstTimestamp,
       MAX(timestamp) as lastTimestamp
     FROM invocations
@@ -199,7 +197,6 @@ export function getInvocationStats(dataDir?: string): InvocationStats {
     totalCacheReadTokens: row.totalCacheReadTokens,
     totalCacheCreationTokens: row.totalCacheCreationTokens,
     totalInvocations: row.totalInvocations,
-    maxTurnsHits: row.maxTurnsHits,
     firstRecordedAt: row.firstTimestamp
       ? new Date(row.firstTimestamp).toISOString()
       : new Date().toISOString(),

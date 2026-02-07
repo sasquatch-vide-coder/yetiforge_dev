@@ -39,6 +39,10 @@ interface ProjectsStatus {
 export interface StatusData {
   timestamp: number;
   service: ServiceStatus;
+  services: {
+    tiffbot: ServiceStatus;
+    nginx: ServiceStatus;
+  };
   system: SystemStatus;
   bot: BotStatus;
   projects: ProjectsStatus;

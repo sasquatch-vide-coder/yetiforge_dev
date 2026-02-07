@@ -100,8 +100,8 @@ docs/                 # Personality spec & documentation
 ### Installation
 
 ```bash
-git clone https://github.com/sasquatch-vide-coder/rumpbot.git
-cd rumpbot
+git clone https://github.com/sasquatch-vide-coder/yetiforge.git
+cd yetiforge
 npm install
 cd status/client && npm install && cd ../..
 ```
@@ -115,7 +115,6 @@ TELEGRAM_BOT_TOKEN=your-bot-token
 ALLOWED_USER_IDS=123456789,987654321
 DEFAULT_PROJECT_DIR=/home/user/projects/default
 CLAUDE_CLI_PATH=claude
-MAX_TURNS=10
 CLAUDE_TIMEOUT_MS=300000
 DATA_DIR=./data
 ADMIN_JWT_SECRET=your-secret-key

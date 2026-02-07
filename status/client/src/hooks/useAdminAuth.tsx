@@ -31,7 +31,7 @@ type AdminAuthContextType = AdminAuthState & AdminAuthActions;
 
 const AdminAuthContext = createContext<AdminAuthContextType | null>(null);
 
-const TOKEN_KEY = "rumpbot_admin_token";
+const TOKEN_KEY = "yetiforge_admin_token";
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() =>

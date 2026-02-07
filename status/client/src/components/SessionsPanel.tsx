@@ -96,31 +96,32 @@ export function SessionsPanel({ token }: Props) {
   const otherSessions = sessions.filter((s) => !s.isCurrent);
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <h2 className="text-xl font-bold uppercase mb-4 font-mono">
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4">
+      <h2 className="text-sm font-bold uppercase mb-2 font-mono">
         Active Sessions
       </h2>
 
       {error && (
-        <p className="text-brutal-red font-mono text-sm mb-2">{error}</p>
+        <p className="text-brutal-red font-mono text-[10px] mb-1">{error}</p>
       )}
       {loading && (
-        <p className="font-mono text-sm text-brutal-black/60 mb-2">
+        <p className="font-mono text-xs text-brutal-black/60 mb-1">
           Loading...
         </p>
       )}
 
       {!loading && (
         <>
-          <div className="w-full overflow-x-auto">
-            <table className="w-full text-xs">
+          {/* Desktop table */}
+          <div className="hidden md:block w-full overflow-x-auto">
+            <table className="w-full text-[10px]">
               <thead>
                 <tr className="bg-brutal-black text-brutal-white uppercase">
-                  <th className="px-2 py-1 text-left">Issued</th>
-                  <th className="px-2 py-1 text-left">IP</th>
-                  <th className="px-2 py-1 text-left">Expires In</th>
-                  <th className="px-2 py-1 text-center">Status</th>
-                  <th className="px-2 py-1 text-center">Action</th>
+                  <th className="px-1.5 py-0.5 text-left">Issued</th>
+                  <th className="px-1.5 py-0.5 text-left">IP</th>
+                  <th className="px-1.5 py-0.5 text-left">Expires In</th>
+                  <th className="px-1.5 py-0.5 text-center">Status</th>
+                  <th className="px-1.5 py-0.5 text-center">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,30 +132,30 @@ export function SessionsPanel({ token }: Props) {
                       i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"
                     }`}
                   >
-                    <td className="px-2 py-1 whitespace-nowrap">
+                    <td className="px-1.5 py-0.5 whitespace-nowrap">
                       {timeAgo(session.issuedAt)}
                     </td>
-                    <td className="px-2 py-1 font-mono">{session.ip}</td>
-                    <td className="px-2 py-1 whitespace-nowrap">
+                    <td className="px-1.5 py-0.5 font-mono">{session.ip}</td>
+                    <td className="px-1.5 py-0.5 whitespace-nowrap">
                       {timeUntil(session.expiresAt)}
                     </td>
-                    <td className="px-2 py-1 text-center">
+                    <td className="px-1.5 py-0.5 text-center">
                       {session.isCurrent ? (
-                        <span className="bg-brutal-green text-brutal-black px-2 py-0.5 font-bold">
+                        <span className="bg-brutal-green text-brutal-black px-1.5 py-0.5 font-bold text-[10px]">
                           CURRENT
                         </span>
                       ) : (
-                        <span className="bg-brutal-blue text-brutal-white px-2 py-0.5 font-bold">
+                        <span className="bg-brutal-blue text-brutal-white px-1.5 py-0.5 font-bold text-[10px]">
                           ACTIVE
                         </span>
                       )}
                     </td>
-                    <td className="px-2 py-1 text-center">
+                    <td className="px-1.5 py-0.5 text-center">
                       {!session.isCurrent && (
                         <button
                           onClick={() => handleRevoke(session.jti)}
                           disabled={revoking === session.jti}
-                          className="bg-brutal-red text-brutal-white font-bold uppercase py-1 px-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
+                          className="bg-brutal-red text-brutal-white font-bold uppercase py-0.5 px-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-[10px] font-mono disabled:opacity-50"
                         >
                           {revoking === session.jti ? "..." : "Revoke"}
                         </button>
@@ -165,19 +166,60 @@ export function SessionsPanel({ token }: Props) {
               </tbody>
             </table>
             {sessions.length === 0 && (
-              <div className="text-center text-xs text-brutal-black/40 py-4 uppercase">
+              <div className="text-center text-[10px] text-brutal-black/40 py-2 uppercase">
                 No active sessions
               </div>
             )}
           </div>
 
+          {/* Mobile card layout */}
+          <div className="md:hidden space-y-2">
+            {sessions.length === 0 && (
+              <div className="text-center text-[10px] text-brutal-black/40 py-2 uppercase">
+                No active sessions
+              </div>
+            )}
+            {sessions.map((session) => (
+              <div
+                key={session.jti}
+                className="bg-brutal-bg brutal-border p-2 space-y-1"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-bold">{session.ip}</span>
+                  {session.isCurrent ? (
+                    <span className="bg-brutal-green text-brutal-black px-1.5 py-0.5 font-bold text-[10px]">
+                      CURRENT
+                    </span>
+                  ) : (
+                    <span className="bg-brutal-blue text-brutal-white px-1.5 py-0.5 font-bold text-[10px]">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between text-[10px] text-brutal-black/70">
+                  <span>Issued {timeAgo(session.issuedAt)}</span>
+                  <span>Expires in {timeUntil(session.expiresAt)}</span>
+                </div>
+                {!session.isCurrent && (
+                  <button
+                    onClick={() => handleRevoke(session.jti)}
+                    disabled={revoking === session.jti}
+                    className="w-full bg-brutal-red text-brutal-white font-bold uppercase py-1.5 px-3 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
+                  >
+                    {revoking === session.jti ? "Revoking..." : "Revoke"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
           {/* Revoke All Others */}
           {otherSessions.length > 0 && (
-            <div className="mt-4">
+            <div className="mt-2">
               <button
                 onClick={handleRevokeAll}
                 disabled={revokingAll}
-                className="bg-brutal-red text-brutal-white font-bold uppercase py-2 px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-sm font-mono disabled:opacity-50"
+                className="bg-brutal-red text-brutal-white font-bold uppercase py-1.5 px-3 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
               >
                 {revokingAll
                   ? "Revoking..."
@@ -189,7 +231,7 @@ export function SessionsPanel({ token }: Props) {
       )}
 
       {/* Footer info */}
-      <div className="mt-3 text-xs text-brutal-black/40 uppercase">
+      <div className="mt-2 text-[10px] text-brutal-black/40 uppercase">
         Auto-refresh every 15s
       </div>
     </div>

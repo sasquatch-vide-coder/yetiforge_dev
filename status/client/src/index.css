@@ -39,7 +39,16 @@ body {
   word-break: break-word;
 }
 
-/* Prevent horizontal scroll on mobile by ensuring shadows don't cause overflow */
+/* Hide scrollbar for tab navigation while allowing scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Mobile-specific adjustments */
 @media (max-width: 768px) {
   html, body {
     overflow-x: hidden;
@@ -54,13 +63,13 @@ body {
     overflow-x: hidden;
   }
 
-  /* Remove shadows entirely on mobile to prevent any overflow */
+  /* Reduced shadows on mobile (2px) instead of removing entirely */
   .brutal-shadow {
-    box-shadow: none !important;
+    box-shadow: 2px 2px 0 var(--color-brutal-black) !important;
   }
 
   .brutal-shadow-lg {
-    box-shadow: none !important;
+    box-shadow: 3px 3px 0 var(--color-brutal-black) !important;
   }
 
   /* Ensure brutal borders don't cause width issues */

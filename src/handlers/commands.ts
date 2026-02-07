@@ -13,6 +13,9 @@ import { MemoryManager } from "../memory-manager.js";
 import { CronManager } from "../cron-manager.js";
 import { WebhookManager } from "../webhook-manager.js";
 import { ChatAgent } from "../agents/chat-agent.js";
+import { ActiveTaskTracker } from "../active-task-tracker.js";
+import { TaskQueue } from "../task-queue.js";
+import { startQueueProcessing } from "./message.js";
 
 export function registerCommands(
   bot: Bot,
@@ -27,6 +30,8 @@ export function registerCommands(
   cronManager?: CronManager,
   webhookManager?: WebhookManager,
   chatAgent?: ChatAgent,
+  activeTaskTracker?: ActiveTaskTracker,
+  taskQueue?: TaskQueue,
 ): void {
   bot.command("start", (ctx) => {
     ctx.reply(
@@ -36,6 +41,8 @@ export function registerCommands(
       "/status - Current session info\n" +
       "/reset - Clear conversation session\n" +
       "/cancel - Abort current request\n" +
+      "/queue - View/manage task queue\n" +
+      "/resume - Resume interrupted tasks\n" +
       "/model - Show agent model config\n" +
       "/project - Manage projects\n" +
       "/git - Git operations\n" +
@@ -52,6 +59,8 @@ export function registerCommands(
       "/status - Session & project info\n" +
       "/reset - Clear conversation context\n" +
       "/cancel - Abort current execution\n" +
+      "/queue list|cancel|clear - Task queue management\n" +
+      "/resume - Resume interrupted tasks\n" +
       "/model - Show agent model config\n" +
       "/project list|add|switch|remove - Manage projects\n" +
       "/git status|commit|push|pr - Git operations\n" +
@@ -90,6 +99,16 @@ export function registerCommands(
       lines.push(`Memory notes: ${notes.length}`);
     }
 
+    // Add queue info
+    if (taskQueue) {
+      const qLen = taskQueue.getQueueLength(chatId);
+      const execBusy = chatLocks.isExecutorBusy(chatId);
+      lines.push(`Executor: ${execBusy ? "busy" : "idle"}`);
+      if (qLen > 0) {
+        lines.push(`Queue: ${qLen}/5 tasks`);
+      }
+    }
+
     // Add cron count
     if (cronManager) {
       const jobs = cronManager.getJobsForChat(chatId);
@@ -116,12 +135,226 @@ export function registerCommands(
     }
   });
 
+  // ── /queue command ──
+  bot.command("queue", async (ctx) => {
+    const chatId = ctx.chat.id;
+
+    if (!taskQueue) {
+      await ctx.reply("Task queue system is not available.");
+      return;
+    }
+
+    const args = (ctx.match as string || "").trim();
+    const parts = args.split(/\s+/);
+    const subcommand = parts[0]?.toLowerCase();
+
+    if (!subcommand || subcommand === "list") {
+      const tasks = taskQueue.peek(chatId);
+      const isBusy = chatLocks.isExecutorBusy(chatId);
+
+      if (tasks.length === 0 && !isBusy) {
+        await ctx.reply("No tasks queued and executor is idle.");
+        return;
+      }
+
+      const lines: string[] = [];
+
+      if (isBusy) {
+        lines.push("⚙️ *Executor:* Currently busy\n");
+      } else {
+        lines.push("💤 *Executor:* Idle\n");
+      }
+
+      if (tasks.length === 0) {
+        lines.push("Queue is empty.");
+      } else {
+        lines.push(`*Queued Tasks (${tasks.length}/5):*`);
+        for (let i = 0; i < tasks.length; i++) {
+          const t = tasks[i];
+          const age = formatAge(t.queuedAt);
+          lines.push(`${i + 1}. ${t.task.slice(0, 80)}`);
+          lines.push(`   Complexity: ${t.complexity} | Queued: ${age} ago`);
+        }
+      }
+
+      lines.push("");
+      lines.push("Commands: `/queue cancel <number>` | `/queue clear`");
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+      return;
+    }
+
+    if (subcommand === "cancel") {
+      const idx = parseInt(parts[1], 10);
+      if (isNaN(idx) || idx < 1) {
+        await ctx.reply("Usage: `/queue cancel <number>` (use `/queue list` to see numbers)", { parse_mode: "Markdown" });
+        return;
+      }
+
+      const removed = taskQueue.cancelByPosition(chatId, idx);
+      if (removed) {
+        await ctx.reply(`🗑️ Removed queued task #${idx}: "${removed.task.slice(0, 60)}"`);
+      } else {
+        const queueLen = taskQueue.getQueueLength(chatId);
+        if (queueLen === 0) {
+          await ctx.reply("Queue is empty — nothing to cancel.");
+        } else {
+          await ctx.reply(`Invalid number. Queue has ${queueLen} task(s). Use \`/queue list\` to see them.`, { parse_mode: "Markdown" });
+        }
+      }
+      return;
+    }
+
+    if (subcommand === "clear") {
+      const count = taskQueue.clearChat(chatId);
+      if (count > 0) {
+        await ctx.reply(`🗑️ Cleared ${count} queued task(s).`);
+      } else {
+        await ctx.reply("Queue is already empty.");
+      }
+      return;
+    }
+
+    await ctx.reply("Usage: `/queue list|cancel|clear`", { parse_mode: "Markdown" });
+  });
+
+  // ── /resume command ──
+  bot.command("resume", async (ctx) => {
+    const chatId = ctx.chat.id;
+
+    if (!activeTaskTracker) {
+      await ctx.reply("Task recovery system is not available.");
+      return;
+    }
+
+    const args = (ctx.match as string || "").trim();
+
+    // Handle /resume queue — process queued tasks from before restart
+    if (args === "queue") {
+      if (!taskQueue) {
+        await ctx.reply("Task queue system is not available.");
+        return;
+      }
+
+      const qLen = taskQueue.getQueueLength(chatId);
+      if (qLen === 0) {
+        await ctx.reply("No queued tasks to resume.");
+        return;
+      }
+
+      if (chatLocks.isExecutorBusy(chatId)) {
+        await ctx.reply("Executor is already busy. Queued tasks will auto-start when it finishes.");
+        return;
+      }
+
+      await ctx.reply(`🚀 Resuming ${qLen} queued task(s)...`);
+      startQueueProcessing(chatId, chatLocks).catch((err) => {
+        logger.error({ chatId, err }, "Error starting queue processing from /resume queue");
+      });
+      return;
+    }
+
+    const interrupted = activeTaskTracker.getForChat(chatId);
+    if (interrupted.length === 0) {
+      await ctx.reply("No interrupted tasks to resume. Use `/resume queue` to process queued tasks.", { parse_mode: "Markdown" });
+      return;
+    }
+
+    if (args === "clear") {
+      // Clear all interrupted tasks for this chat
+      for (const task of interrupted) {
+        activeTaskTracker.remove(task.id);
+      }
+      await ctx.reply(`Cleared ${interrupted.length} interrupted task(s).`);
+      return;
+    }
+
+    if (args === "list" || !args) {
+      // Show interrupted tasks
+      const lines = [`*Interrupted Tasks (${interrupted.length}):*`];
+      for (let i = 0; i < interrupted.length; i++) {
+        const t = interrupted[i];
+        const age = formatAge(t.startedAt);
+        const sessionSnip = t.sessionId ? `\`${t.sessionId.slice(0, 12)}...\`` : "no session";
+        lines.push(`${i + 1}. ${t.task.slice(0, 80)}`);
+        lines.push(`   Session: ${sessionSnip}`);
+        lines.push(`   Started: ${age} ago | Dir: \`${t.cwd}\``);
+      }
+      lines.push("");
+      lines.push("Use `/resume <number>` to resume a task, or `/resume clear` to dismiss all.");
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
+      return;
+    }
+
+    // Resume a specific task by number
+    const idx = parseInt(args, 10);
+    if (isNaN(idx) || idx < 1 || idx > interrupted.length) {
+      await ctx.reply(`Invalid task number. Use 1-${interrupted.length}, or \`/resume list\` to see tasks.`, { parse_mode: "Markdown" });
+      return;
+    }
+
+    const task = interrupted[idx - 1];
+
+    if (!task.sessionId) {
+      // No session ID — can't resume, just clear it
+      activeTaskTracker.remove(task.id);
+      await ctx.reply("That task has no session ID (crashed before Claude started). Removed from list.");
+      return;
+    }
+
+    if (!executor) {
+      await ctx.reply("Executor is not available.");
+      return;
+    }
+
+    if (chatLocks.isLocked(chatId)) {
+      await ctx.reply("Still processing a previous request. Use /cancel first.");
+      return;
+    }
+
+    // Remove from tracker since we're about to re-execute
+    activeTaskTracker.remove(task.id);
+
+    const resumePrompt = `You are resuming an interrupted task. The previous session was interrupted (process crash/restart). Continue where you left off.\n\nOriginal task: ${task.task}\n\nPlease review what was done in the previous session and complete any remaining work.`;
+
+    await ctx.reply(`🔄 Resuming interrupted task with session \`${task.sessionId.slice(0, 12)}...\``, { parse_mode: "Markdown" });
+
+    const controller = chatLocks.lock(chatId);
+    const stopTyping = startTypingIndicator(ctx);
+
+    try {
+      const result = await invokeClaude({
+        prompt: resumePrompt,
+        cwd: task.cwd,
+        sessionId: task.sessionId,
+        abortSignal: controller.signal,
+        config,
+        model: agentConfig.getConfig("executor").model,
+        timeoutMsOverride: 0,
+      });
+
+      if (result.sessionId) {
+        sessionManager.set(chatId, result.sessionId, task.cwd, "orchestrator");
+        await sessionManager.save();
+      }
+
+      const icon = result.isError ? "❌" : "✅";
+      await sendResponse(ctx, `${icon} Resumed task completed:\n\n${result.result}`);
+    } catch (err: any) {
+      if (err.message === "Cancelled") return;
+      logger.error({ chatId, err, sessionId: task.sessionId }, "Error resuming task");
+      await ctx.reply(`Error resuming task: ${err.message}`).catch(() => {});
+    } finally {
+      stopTyping();
+      chatLocks.unlock(chatId);
+    }
+  });
+
   bot.command("model", (ctx) => {
     const cfg = agentConfig.getAll();
     const lines = [
       "*Agent Models:*",
-      `Chat: \`${cfg.chat.model}\` (${cfg.chat.maxTurns} turns, ${cfg.chat.timeoutMs === 0 ? "no timeout" : cfg.chat.timeoutMs / 1000 + "s"})`,
-      `Executor: \`${cfg.executor.model}\` (${cfg.executor.maxTurns} turns, ${cfg.executor.timeoutMs === 0 ? "no timeout" : cfg.executor.timeoutMs / 1000 + "s"})`,
+      `Chat: \`${cfg.chat.model}\` (${cfg.chat.timeoutMs === 0 ? "no timeout" : cfg.chat.timeoutMs / 1000 + "s"})`,
+      `Executor: \`${cfg.executor.model}\` (${cfg.executor.timeoutMs === 0 ? "no timeout" : cfg.executor.timeoutMs / 1000 + "s"})`,
     ];
     ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
   });

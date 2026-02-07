@@ -121,22 +121,22 @@ export function AuditLogPanel({ token }: Props) {
   );
 
   const filterBtnClass = (active: boolean) =>
-    `px-2 py-1 text-xs font-bold uppercase font-mono brutal-border transition-all ${
+    `px-1.5 py-0.5 text-[10px] font-bold uppercase font-mono brutal-border transition-all ${
       active
         ? "bg-brutal-black text-brutal-white"
         : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
     }`;
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6 col-span-full">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold uppercase font-mono">Audit Log</h2>
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4 col-span-full">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-bold uppercase font-mono">Audit Log</h2>
         <button
           onClick={() => {
             fetchAuditLog();
             fetchLoginAttempts();
           }}
-          className="bg-brutal-black text-brutal-white font-bold uppercase py-2 px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-sm font-mono disabled:opacity-50"
+          className="bg-brutal-black text-brutal-white font-bold uppercase py-1.5 px-3 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
         >
           Refresh
         </button>
@@ -144,24 +144,24 @@ export function AuditLogPanel({ token }: Props) {
 
       {/* Locked IPs */}
       {lockedIps.length > 0 && (
-        <div className="bg-brutal-red/10 brutal-border p-4 mb-4">
-          <h3 className="text-sm font-bold uppercase font-mono mb-2">
+        <div className="bg-brutal-red/10 brutal-border p-2 mb-2">
+          <h3 className="text-[10px] font-bold uppercase font-mono mb-1">
             Locked IPs
           </h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {lockedIps.map(([ip, info]) => (
               <div
                 key={ip}
-                className="flex items-center gap-2 bg-brutal-white brutal-border px-3 py-1"
+                className="flex items-center gap-1.5 bg-brutal-white brutal-border px-2 py-0.5"
               >
-                <span className="font-mono text-sm font-bold">{ip}</span>
-                <span className="text-xs text-brutal-black/60">
+                <span className="font-mono text-[10px] font-bold">{ip}</span>
+                <span className="text-[10px] text-brutal-black/60">
                   {info.attempts} attempts
                 </span>
                 <button
                   onClick={() => handleUnlock(ip)}
                   disabled={unlocking === ip}
-                  className="bg-brutal-orange text-brutal-white font-bold uppercase py-1 px-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
+                  className="bg-brutal-orange text-brutal-white font-bold uppercase py-0.5 px-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-[10px] font-mono disabled:opacity-50"
                 >
                   {unlocking === ip ? "..." : "Unlock"}
                 </button>
@@ -172,8 +172,8 @@ export function AuditLogPanel({ token }: Props) {
       )}
 
       {/* Action filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="font-bold uppercase text-xs tracking-widest mr-2">
+      <div className="flex flex-wrap items-center gap-1 mb-2 overflow-x-auto">
+        <span className="font-bold uppercase text-[10px] tracking-widest mr-1">
           Filter
         </span>
         <div className="flex flex-wrap gap-0">
@@ -197,68 +197,107 @@ export function AuditLogPanel({ token }: Props) {
 
       {/* Error / Loading */}
       {error && (
-        <p className="text-brutal-red font-mono text-sm mb-2">{error}</p>
+        <p className="text-brutal-red font-mono text-[10px] mb-1">{error}</p>
       )}
       {loading && (
-        <p className="font-mono text-sm text-brutal-black/60 mb-2">
+        <p className="font-mono text-xs text-brutal-black/60 mb-1">
           Loading...
         </p>
       )}
 
-      {/* Table */}
+      {/* Table (desktop) */}
       {!loading && (
-        <div className="w-full overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-brutal-black text-brutal-white uppercase">
-                <th className="px-2 py-1 text-left">Time</th>
-                <th className="px-2 py-1 text-left">Action</th>
-                <th className="px-2 py-1 text-left">IP</th>
-                <th className="px-2 py-1 text-left">Details</th>
-                <th className="px-2 py-1 text-left">Username</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry, i) => (
-                <tr
-                  key={entry.id}
-                  className={`brutal-border border-b ${
-                    i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"
-                  }`}
-                >
-                  <td className="px-2 py-1 whitespace-nowrap">
-                    {timeAgo(entry.timestamp)}
-                  </td>
-                  <td className="px-2 py-1">
-                    <span
-                      className={`px-2 py-0.5 font-bold ${actionColor(
-                        entry.action
-                      )}`}
-                    >
-                      {entry.action.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                  <td className="px-2 py-1 font-mono">
-                    {entry.ip || "—"}
-                  </td>
-                  <td className="px-2 py-1 max-w-[300px] truncate">
-                    {entry.details || "—"}
-                  </td>
-                  <td className="px-2 py-1">{entry.username || "—"}</td>
+        <>
+          <div className="hidden md:block w-full overflow-x-auto">
+            <table className="w-full text-[10px]">
+              <thead>
+                <tr className="bg-brutal-black text-brutal-white uppercase">
+                  <th className="px-1.5 py-0.5 text-left">Time</th>
+                  <th className="px-1.5 py-0.5 text-left">Action</th>
+                  <th className="px-1.5 py-0.5 text-left">IP</th>
+                  <th className="px-1.5 py-0.5 text-left">Details</th>
+                  <th className="px-1.5 py-0.5 text-left">Username</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {entries.length === 0 && (
-            <div className="text-center text-xs text-brutal-black/40 py-4 uppercase">
-              No audit log entries
-            </div>
-          )}
-        </div>
+              </thead>
+              <tbody>
+                {entries.map((entry, i) => (
+                  <tr
+                    key={entry.id}
+                    className={`brutal-border border-b ${
+                      i % 2 === 0 ? "bg-brutal-bg" : "bg-brutal-white"
+                    }`}
+                  >
+                    <td className="px-1.5 py-0.5 whitespace-nowrap">
+                      {timeAgo(entry.timestamp)}
+                    </td>
+                    <td className="px-1.5 py-0.5">
+                      <span
+                        className={`px-1.5 py-0.5 font-bold text-[10px] ${actionColor(
+                          entry.action
+                        )}`}
+                      >
+                        {entry.action.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                    <td className="px-1.5 py-0.5 font-mono">
+                      {entry.ip || "—"}
+                    </td>
+                    <td className="px-1.5 py-0.5 max-w-[300px] truncate">
+                      {entry.details || "—"}
+                    </td>
+                    <td className="px-1.5 py-0.5">{entry.username || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {entries.length === 0 && (
+              <div className="text-center text-[10px] text-brutal-black/40 py-2 uppercase">
+                No audit log entries
+              </div>
+            )}
+          </div>
+
+          {/* Mobile card layout */}
+          <div className="md:hidden space-y-2">
+            {entries.length === 0 && (
+              <div className="text-center text-[10px] text-brutal-black/40 py-2 uppercase">
+                No audit log entries
+              </div>
+            )}
+            {entries.map((entry) => (
+              <div
+                key={entry.id}
+                className="bg-brutal-bg brutal-border p-2 space-y-1"
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`px-1.5 py-0.5 font-bold text-[10px] ${actionColor(
+                      entry.action
+                    )}`}
+                  >
+                    {entry.action.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-[10px] text-brutal-black/60">
+                    {timeAgo(entry.timestamp)}
+                  </span>
+                </div>
+                {entry.details && (
+                  <p className="text-[10px] font-mono text-brutal-black/70 break-words">
+                    {entry.details}
+                  </p>
+                )}
+                <div className="flex justify-between text-[10px] text-brutal-black/50">
+                  <span className="font-mono">{entry.ip || "—"}</span>
+                  <span>{entry.username || "—"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Footer info */}
-      <div className="mt-3 text-xs text-brutal-black/40 uppercase">
+      <div className="mt-2 text-[10px] text-brutal-black/40 uppercase">
         Auto-refresh every 30s &middot; Showing up to 100 entries
       </div>
     </div>

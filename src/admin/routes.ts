@@ -84,7 +84,7 @@ export async function registerAdminRoutes(
 
   // ── Bot Config (public) ──
   app.get("/api/bot/config", async () => {
-    return { botName: botConfigManager?.getBotName() || "TIFFBOT" };
+    return { botName: botConfigManager?.getBotName() || "YETIFORGE" };
   });
 
   // ── Login ──
@@ -193,7 +193,7 @@ export async function registerAdminRoutes(
     async () => {
       const secret = new OTPAuth.Secret();
       const totp = new OTPAuth.TOTP({
-        issuer: botConfigManager?.getBotName() || "TIFFBOT",
+        issuer: botConfigManager?.getBotName() || "YETIFORGE",
         label: "Admin",
         secret,
         algorithm: "SHA1",
@@ -303,15 +303,13 @@ export async function registerAdminRoutes(
 
       // Check CLI installation
       try {
-        result.version = execSync("claude --version 2>&1", {
+        const cli = process.env.CLAUDE_CLI_PATH || "claude";
+        result.version = execSync(`${cli} --version 2>&1`, {
           encoding: "utf-8",
           timeout: 5000,
         }).trim();
         result.installed = true;
-        result.path = execSync("which claude", {
-          encoding: "utf-8",
-          timeout: 5000,
-        }).trim();
+        result.path = cli;
       } catch {}
 
       return result;
@@ -325,7 +323,7 @@ export async function registerAdminRoutes(
     async () => {
       return new Promise((resolve) => {
         exec(
-          "claude update 2>&1",
+          `${process.env.CLAUDE_CLI_PATH || "claude"} update 2>&1`,
           { encoding: "utf-8", timeout: 30000 },
           (err, stdout) => {
             const output = stdout || (err?.message ?? "");
@@ -353,7 +351,7 @@ export async function registerAdminRoutes(
       auditLogger.log({ action: "claude_update", ip: request.ip });
       return new Promise((resolve) => {
         exec(
-          "claude update 2>&1",
+          `sudo ${process.env.CLAUDE_CLI_PATH || "claude"} update 2>&1`,
           { encoding: "utf-8", timeout: 120000 },
           (err, stdout) => {
             const output = stdout || (err?.message ?? "");
@@ -628,6 +626,62 @@ export async function registerAdminRoutes(
     }
   );
 
+  // ── Get Username ──
+  app.get(
+    "/api/admin/username",
+    { preHandler: authHook },
+    async () => {
+      return { username: auth.getUsername() || "admin" };
+    }
+  );
+
+  // ── Change Username ──
+  app.post(
+    "/api/admin/change-username",
+    { preHandler: authHook },
+    async (request, reply) => {
+      const { newUsername } = request.body as { newUsername: string };
+
+      if (!newUsername || !newUsername.trim()) {
+        reply.code(400).send({ error: "Username cannot be empty" });
+        return;
+      }
+
+      const trimmed = newUsername.trim();
+
+      if (trimmed.length < 3) {
+        reply.code(400).send({ error: "Username must be at least 3 characters" });
+        return;
+      }
+
+      if (trimmed.length > 32) {
+        reply.code(400).send({ error: "Username must be 32 characters or fewer" });
+        return;
+      }
+
+      if (!/^[a-zA-Z0-9_.-]+$/.test(trimmed)) {
+        reply.code(400).send({
+          error: "Username can only contain letters, numbers, underscores, dots, and hyphens",
+        });
+        return;
+      }
+
+      try {
+        await auth.changeUsername(trimmed);
+        auditLogger.log({
+          action: "username_change",
+          ip: request.ip,
+          details: { newUsername: trimmed },
+        });
+        return { ok: true, username: trimmed };
+      } catch (e) {
+        reply.code(400).send({
+          error: e instanceof Error ? e.message : "Failed to change username",
+        });
+      }
+    }
+  );
+
   // ── Agent Config Get ──
   app.get(
     "/api/admin/agents/config",
@@ -651,17 +705,33 @@ export async function registerAdminRoutes(
       }
 
       const body = request.body as {
-        chat?: { model?: string; maxTurns?: number; timeoutMs?: number };
-        executor?: { model?: string; maxTurns?: number; timeoutMs?: number };
+        chat?: { model?: string; timeoutMs?: number };
+        executor?: {
+          model?: string;
+          timeoutMs?: number;
+          stallWarning?: { trivialMs?: number; moderateMs?: number; complexMs?: number };
+          stallKill?: { trivialMs?: number; moderateMs?: number; complexMs?: number };
+          stallGraceMultiplier?: number;
+        };
       };
 
       if (body.chat?.model) agentConfig.setModel("chat", body.chat.model);
-      if (body.chat?.maxTurns !== undefined) agentConfig.setMaxTurns("chat", body.chat.maxTurns);
       if (body.chat?.timeoutMs !== undefined) agentConfig.setTimeoutMs("chat", body.chat.timeoutMs);
 
       if (body.executor?.model) agentConfig.setModel("executor", body.executor.model);
-      if (body.executor?.maxTurns !== undefined) agentConfig.setMaxTurns("executor", body.executor.maxTurns);
       if (body.executor?.timeoutMs !== undefined) agentConfig.setTimeoutMs("executor", body.executor.timeoutMs);
+
+      if (body.executor?.stallWarning) {
+        const current = agentConfig.getStallWarning("executor");
+        agentConfig.setStallWarning("executor", { ...current, ...body.executor.stallWarning });
+      }
+      if (body.executor?.stallKill) {
+        const current = agentConfig.getStallKill("executor");
+        agentConfig.setStallKill("executor", { ...current, ...body.executor.stallKill });
+      }
+      if (body.executor?.stallGraceMultiplier !== undefined) {
+        agentConfig.setStallGraceMultiplier("executor", body.executor.stallGraceMultiplier);
+      }
 
       await agentConfig.save();
       auditLogger.log({
@@ -670,32 +740,6 @@ export async function registerAdminRoutes(
         details: body,
       });
       return { ok: true, config: agentConfig.getAll() };
-    }
-  );
-
-  // ── Bot Config Update ──
-  app.post(
-    "/api/admin/bot/config",
-    { preHandler: authHook },
-    async (request, reply) => {
-      if (!botConfigManager) {
-        reply.code(500).send({ error: "Bot config not available" });
-        return;
-      }
-
-      const body = request.body as { botName?: string };
-
-      if (body.botName !== undefined) {
-        botConfigManager.setBotName(body.botName);
-      }
-
-      await botConfigManager.save();
-      auditLogger.log({
-        action: "bot_config_update",
-        ip: request.ip,
-        details: { botName: body.botName },
-      });
-      return { ok: true, botName: botConfigManager.getBotName() };
     }
   );
 

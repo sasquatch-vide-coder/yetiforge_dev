@@ -99,85 +99,61 @@ export function AdminTelegramPanel({ token }: Props) {
   };
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <div className="flex items-center justify-between mb-4 border-b-3 border-brutal-black pb-2">
-        <h2 className="text-lg font-bold uppercase">Telegram Bot</h2>
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-bold uppercase font-mono">Telegram Bot</h2>
         {status && !editing && (
           <button
             onClick={() => setEditing(true)}
-            className="bg-brutal-blue text-brutal-white font-bold uppercase py-1 px-3 brutal-border text-xs hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none brutal-shadow transition-all"
+            className="bg-brutal-blue text-brutal-white font-bold uppercase py-0.5 px-2 brutal-border text-[10px] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-none brutal-shadow transition-all"
           >
             Edit
           </button>
         )}
       </div>
 
-      {loading && <p className="font-mono text-sm">Checking status...</p>}
-      {error && (
-        <p className="font-mono text-sm text-brutal-red mb-2">{error}</p>
-      )}
-      {saveMsg && (
-        <p className="font-mono text-sm text-brutal-green font-bold mb-2">
-          {saveMsg}
-        </p>
-      )}
+      {loading && <p className="font-mono text-xs">Checking...</p>}
+      {error && <p className="font-mono text-xs text-brutal-red mb-1">{error}</p>}
+      {saveMsg && <p className="font-mono text-xs text-brutal-green font-bold mb-1">{saveMsg}</p>}
 
       {status && !editing && (
-        <div className="space-y-3 font-mono text-sm">
-          <div className="flex justify-between">
-            <span className="uppercase font-bold">Configured</span>
-            <span
-              className={`px-2 py-0.5 font-bold ${
-                status.configured
-                  ? "bg-brutal-green text-brutal-black"
-                  : "bg-brutal-red text-brutal-white"
-              }`}
-            >
-              {status.configured ? "YES" : "NO"}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="uppercase font-bold">Bot Running</span>
-            <span
-              className={`px-2 py-0.5 font-bold ${
-                status.botRunning
-                  ? "bg-brutal-green text-brutal-black"
-                  : "bg-brutal-red text-brutal-white"
-              }`}
-            >
-              {status.botRunning ? "YES" : "NO"}
-            </span>
+        <div className="space-y-1 font-mono text-xs">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            <div className="flex items-center justify-between">
+              <span className="uppercase font-bold text-[10px]">Configured</span>
+              <span className={`px-1.5 py-0.5 font-bold text-[10px] ${status.configured ? "bg-brutal-green text-brutal-black" : "bg-brutal-red text-brutal-white"}`}>
+                {status.configured ? "YES" : "NO"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="uppercase font-bold text-[10px]">Running</span>
+              <span className={`px-1.5 py-0.5 font-bold text-[10px] ${status.botRunning ? "bg-brutal-green text-brutal-black" : "bg-brutal-red text-brutal-white"}`}>
+                {status.botRunning ? "YES" : "NO"}
+              </span>
+            </div>
           </div>
           {status.botToken && (
-            <div className="flex justify-between">
-              <span className="uppercase font-bold">Bot Token</span>
-              <span className="text-brutal-black/60">{status.botToken}</span>
+            <div className="flex justify-between text-[10px]">
+              <span className="uppercase font-bold">Token</span>
+              <span className="text-brutal-black/60 truncate ml-2">{status.botToken}</span>
             </div>
           )}
-          <div className="flex justify-between">
+          <div className="flex justify-between text-[10px]">
             <span className="uppercase font-bold">Allowed Users</span>
             <span className="font-bold">{status.allowedUserCount}</span>
           </div>
           {status.allowedUserIds.length > 0 && (
-            <div>
-              <span className="uppercase font-bold block mb-1">User IDs</span>
-              <div className="flex flex-wrap gap-1">
-                {status.allowedUserIds.map((id) => (
-                  <span
-                    key={id}
-                    className="bg-brutal-bg px-2 py-0.5 brutal-border text-xs"
-                  >
-                    {id}
-                  </span>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-1 pt-1">
+              {status.allowedUserIds.map((id) => (
+                <span key={id} className="bg-brutal-bg px-1.5 py-0.5 brutal-border text-[10px]">{id}</span>
+              ))}
             </div>
           )}
 
           <button
             onClick={handleRestart}
             disabled={restarting}
-            className="w-full mt-2 bg-brutal-orange text-brutal-black font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-sm"
+            className="w-full mt-1 bg-brutal-orange text-brutal-black font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-[10px]"
           >
             {restarting ? "Restarting..." : "Restart Bot Service"}
           </button>
@@ -185,59 +161,42 @@ export function AdminTelegramPanel({ token }: Props) {
       )}
 
       {editing && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <div>
-            <label className="block font-mono text-xs uppercase font-bold mb-1">
-              Bot Token
-            </label>
+            <label className="block font-mono text-[10px] uppercase font-bold mb-0.5">Bot Token</label>
             <input
               type="text"
               value={editToken}
               onChange={(e) => setEditToken(e.target.value)}
-              placeholder={
-                status?.botToken
-                  ? `Current: ${status.botToken} (leave blank to keep)`
-                  : "Enter Telegram bot token"
-              }
-              className="w-full brutal-border p-2 font-mono text-sm bg-brutal-bg"
+              placeholder={status?.botToken ? `Current: ${status.botToken}` : "Enter bot token"}
+              className="w-full brutal-border p-1.5 font-mono text-xs bg-brutal-bg"
             />
-            <p className="font-mono text-xs text-brutal-black/40 mt-1">
-              Get from @BotFather on Telegram. Leave blank to keep current.
-            </p>
+            <p className="font-mono text-[10px] text-brutal-black/40 mt-0.5">From @BotFather. Blank = keep current.</p>
           </div>
 
           <div>
-            <label className="block font-mono text-xs uppercase font-bold mb-1">
-              Allowed User IDs
-            </label>
+            <label className="block font-mono text-[10px] uppercase font-bold mb-0.5">Allowed User IDs</label>
             <input
               type="text"
               value={editUserIds}
               onChange={(e) => setEditUserIds(e.target.value)}
-              placeholder="Comma-separated user IDs"
-              className="w-full brutal-border p-2 font-mono text-sm bg-brutal-bg"
+              placeholder="Comma-separated IDs"
+              className="w-full brutal-border p-1.5 font-mono text-xs bg-brutal-bg"
             />
-            <p className="font-mono text-xs text-brutal-black/40 mt-1">
-              Telegram user IDs, comma-separated. Use @userinfobot to find
-              yours.
-            </p>
+            <p className="font-mono text-[10px] text-brutal-black/40 mt-0.5">Use @userinfobot to find yours.</p>
           </div>
 
           <div className="flex gap-2">
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex-1 bg-brutal-green text-brutal-black font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-sm"
+              className="flex-1 bg-brutal-green text-brutal-black font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-xs"
             >
               {saving ? "Saving..." : "Save"}
             </button>
             <button
-              onClick={() => {
-                setEditing(false);
-                setEditToken("");
-                setError("");
-              }}
-              className="flex-1 bg-brutal-white text-brutal-black font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-sm"
+              onClick={() => { setEditing(false); setEditToken(""); setError(""); }}
+              className="flex-1 bg-brutal-white text-brutal-black font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs"
             >
               Cancel
             </button>

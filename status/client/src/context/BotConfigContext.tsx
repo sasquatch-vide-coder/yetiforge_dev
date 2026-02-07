@@ -16,7 +16,7 @@ interface BotConfigContextType {
 const BotConfigContext = createContext<BotConfigContextType | null>(null);
 
 export function BotConfigProvider({ children }: { children: ReactNode }) {
-  const [botName, setBotName] = useState("TIFFBOT");
+  const [botName, setBotName] = useState("YETIFORGE");
   const [loading, setLoading] = useState(true);
 
   const fetchConfig = useCallback(async () => {

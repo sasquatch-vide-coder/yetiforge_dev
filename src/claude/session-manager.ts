@@ -8,6 +8,7 @@ interface SessionData {
   sessionId: string;
   projectDir: string;
   lastUsedAt: number;
+  invocationCount?: number;
 }
 
 interface MultiScopeSessionData {
@@ -97,5 +98,31 @@ export class SessionManager {
     scope: SessionScope = "chat"
   ): string | undefined {
     return this.sessions.get(chatId)?.[scope]?.sessionId;
+  }
+
+  /**
+   * Increment the invocation counter for a session scope.
+   * Returns true if the session should be rotated (counter >= maxInvocations).
+   * When rotation is needed, the session is automatically cleared.
+   */
+  incrementAndCheck(
+    chatId: number,
+    scope: SessionScope = "chat",
+    maxInvocations: number = 15,
+  ): boolean {
+    const existing = this.sessions.get(chatId);
+    const session = existing?.[scope];
+    if (!session) return false;
+
+    const count = (session.invocationCount ?? 0) + 1;
+    session.invocationCount = count;
+
+    if (count >= maxInvocations) {
+      logger.info({ chatId, scope, invocationCount: count, maxInvocations }, "Session rotation triggered — clearing stale session");
+      this.clear(chatId, scope);
+      return true;
+    }
+
+    return false;
   }
 }

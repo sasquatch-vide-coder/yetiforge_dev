@@ -19,7 +19,6 @@ export interface InvokeOptions {
   onInvocation?: (raw: any) => void;
   systemPrompt?: string;
   model?: string;
-  maxTurnsOverride?: number;
   timeoutMsOverride?: number;
   /** Restrict available tools. Empty string disables all tools. */
   allowedTools?: string;
@@ -58,8 +57,7 @@ function invokeClaudeInternal(opts: InvokeOptions): Promise<ClaudeResult> {
   return new Promise((resolve, reject) => {
     const args: string[] = [
       "-p", prompt,
-      "--output-format", "json",
-      "--max-turns", String(opts.maxTurnsOverride ?? config.maxTurns),
+      "--output-format", "stream-json",
       "--verbose",
       "--dangerously-skip-permissions",
     ];
@@ -163,43 +161,46 @@ function invokeClaudeInternal(opts: InvokeOptions): Promise<ClaudeResult> {
 }
 
 function parseClaudeOutput(raw: string, onInvocation?: (raw: any) => void): ClaudeResult {
-  // claude --output-format json outputs a JSON object
-  // Find the last complete JSON object in the output (may have other output before it)
-  const trimmed = raw.trim();
+  // stream-json format: one JSON object per line (NDJSON)
+  // We need to find the last "result" type object for the final answer
+  const lines = raw.split("\n").filter((l) => l.trim());
 
-  // Try parsing the full output first
-  try {
-    const data = JSON.parse(trimmed);
-    if (onInvocation) onInvocation(data);
-    return extractResult(data);
-  } catch {
-    // Try to find JSON in the output
-  }
-
-  // Look for JSON object or array at the end (verbose mode may prepend text)
-  const lastClose = Math.max(trimmed.lastIndexOf("}"), trimmed.lastIndexOf("]"));
-  if (lastClose === -1) throw new Error("No JSON found in Claude output");
-
-  const closeChar = trimmed[lastClose];
-  const openChar = closeChar === "}" ? "{" : "[";
-
-  let depth = 0;
-  let start = -1;
-  for (let i = lastClose; i >= 0; i--) {
-    if (trimmed[i] === closeChar) depth++;
-    if (trimmed[i] === openChar) depth--;
-    if (depth === 0) {
-      start = i;
-      break;
+  // Parse all JSON lines, collecting them
+  const parsed: any[] = [];
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine.startsWith("{")) continue;
+    try {
+      parsed.push(JSON.parse(trimmedLine));
+    } catch {
+      // Skip non-JSON lines (verbose mode may produce text)
     }
   }
 
-  if (start === -1) throw new Error("Malformed JSON in Claude output");
+  if (parsed.length === 0) {
+    // Fallback: try legacy single-JSON parsing for backwards compatibility
+    const trimmed = raw.trim();
+    try {
+      const data = JSON.parse(trimmed);
+      if (onInvocation) onInvocation(data);
+      return extractResult(data);
+    } catch {
+      throw new Error("No JSON found in Claude output");
+    }
+  }
 
-  const jsonStr = trimmed.slice(start, lastClose + 1);
-  const data = JSON.parse(jsonStr);
-  if (onInvocation) onInvocation(data);
-  return extractResult(data);
+  // Send all parsed objects to onInvocation as an array
+  if (onInvocation) onInvocation(parsed);
+
+  // Find the last "result" type object
+  const resultObj = [...parsed].reverse().find((obj) => obj.type === "result");
+  if (resultObj) {
+    return extractResult(resultObj);
+  }
+
+  // No result object found — try using the last object
+  const lastObj = parsed[parsed.length - 1];
+  return extractResult(lastObj);
 }
 
 function extractResult(data: any): ClaudeResult {
@@ -224,20 +225,6 @@ function extractResult(data: any): ClaudeResult {
   const duration = data.durationms || data.duration_ms;
   const isError = data.is_error || data.iserror || false;
   const subtype = data.subtype || data.stop_reason || data.stopreason || "";
-
-  // Handle known error/non-standard subtypes
-  if (subtype === "error_max_turns") {
-    const turns = data.numturns || data.num_turns || "unknown";
-    const costStr = costUsd ? ` (cost: $${Number(costUsd).toFixed(2)})` : "";
-    logger.warn({ subtype, turns, sessionId, costUsd }, "extractResult: max turns reached — marking as ERROR");
-    return {
-      result: `FAILED: Hit max turns limit (${turns} turns)${costStr}. The task was not completed — it ran out of allowed turns before finishing.`,
-      sessionId,
-      costUsd,
-      duration,
-      isError: true,
-    };
-  }
 
   if (subtype.startsWith("error")) {
     // Catch-all for any error subtype (error_tool_use, error_*, etc.)

@@ -7,7 +7,7 @@ export interface BotConfigData {
 }
 
 const DEFAULT_CONFIG: BotConfigData = {
-  botName: "TIFFBOT",
+  botName: "YETIFORGE",
 };
 
 export class BotConfigManager {

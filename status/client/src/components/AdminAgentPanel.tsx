@@ -8,7 +8,6 @@ import type { AgentConfigData, AgentTierConfig } from "../lib/adminApi";
 const MODELS = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
   { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
-  { id: "claude-opus-4-5-20251101", label: "Opus 4.5" },
   { id: "claude-opus-4-6", label: "Opus 4.6" },
 ];
 
@@ -16,48 +15,27 @@ interface TierEditorProps {
   label: string;
   config: AgentTierConfig;
   onChange: (updated: AgentTierConfig) => void;
-  showDivider?: boolean;
 }
 
-function TierEditor({ label, config, onChange, showDivider }: TierEditorProps) {
+function TierEditor({ label, config, onChange }: TierEditorProps) {
   return (
-    <div className={showDivider ? "border-t-2 border-brutal-black/20 pt-4 mt-4" : ""}>
-      <h3 className="font-bold uppercase font-mono text-sm mb-3">{label}</h3>
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs uppercase font-bold font-mono mb-1">
-            Model
-          </label>
+    <div>
+      <h3 className="font-bold uppercase font-mono text-[10px] mb-1.5 text-brutal-black/70">{label}</h3>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="block text-[10px] uppercase font-bold font-mono mb-0.5">Model</label>
           <select
             value={config.model}
             onChange={(e) => onChange({ ...config, model: e.target.value })}
-            className="w-full p-2 brutal-border font-mono text-sm bg-brutal-bg"
+            className="w-full p-1.5 brutal-border font-mono text-xs bg-brutal-bg"
           >
             {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
+              <option key={m.id} value={m.id}>{m.label}</option>
             ))}
           </select>
         </div>
-        <div>
-          <label className="block text-xs uppercase font-bold font-mono mb-1">
-            Max Turns
-          </label>
-          <input
-            type="number"
-            min={1}
-            value={config.maxTurns}
-            onChange={(e) =>
-              onChange({ ...config, maxTurns: Math.max(1, parseInt(e.target.value) || 1) })
-            }
-            className="w-full p-2 brutal-border font-mono text-sm bg-brutal-bg"
-          />
-        </div>
-        <div>
-          <label className="block text-xs uppercase font-bold font-mono mb-1">
-            Timeout (seconds)
-          </label>
+        <div className="w-24 flex-shrink-0">
+          <label className="block text-[10px] uppercase font-bold font-mono mb-0.5">Timeout (s)</label>
           <input
             type="number"
             min={0}
@@ -66,11 +44,8 @@ function TierEditor({ label, config, onChange, showDivider }: TierEditorProps) {
               const secs = Math.max(0, parseInt(e.target.value) || 0);
               onChange({ ...config, timeoutMs: secs * 1000 });
             }}
-            className="w-full p-2 brutal-border font-mono text-sm bg-brutal-bg"
+            className="w-full p-1.5 brutal-border font-mono text-xs bg-brutal-bg"
           />
-          <p className="font-mono text-xs text-brutal-black/40 mt-1">
-            0 = no timeout
-          </p>
         </div>
       </div>
     </div>
@@ -105,7 +80,7 @@ export function AdminAgentPanel({ token }: { token: string }) {
     try {
       const result = await updateAgentConfig(config, token);
       setConfig(result.config);
-      setStatusMsg("Configuration saved successfully.");
+      setStatusMsg("Saved.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save config");
     } finally {
@@ -119,42 +94,36 @@ export function AdminAgentPanel({ token }: { token: string }) {
   };
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <h2 className="text-xl font-bold uppercase mb-4 font-mono">Agent Tiers</h2>
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4">
+      <h2 className="text-sm font-bold uppercase mb-2 font-mono">Agent Tiers</h2>
 
-      {loading && <p className="font-mono text-sm">Loading agent config...</p>}
-      {error && (
-        <p className="font-mono text-sm text-brutal-red mb-2">{error}</p>
-      )}
-      {statusMsg && (
-        <p className="font-mono text-sm text-brutal-green font-bold mb-2">
-          {statusMsg}
-        </p>
-      )}
+      {loading && <p className="font-mono text-xs">Loading...</p>}
+      {error && <p className="font-mono text-xs text-brutal-red mb-1">{error}</p>}
+      {statusMsg && <p className="font-mono text-xs text-brutal-green font-bold mb-1">{statusMsg}</p>}
 
       {config && (
-        <div>
+        <div className="space-y-3">
           <TierEditor
             label="Chat Agent"
             config={config.chat}
             onChange={updateTier("chat")}
           />
-          <TierEditor
-            label="Executor"
-            config={config.executor}
-            onChange={updateTier("executor")}
-            showDivider
-          />
-
-          <div className="mt-6">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-brutal-black text-brutal-white font-bold uppercase py-2 px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-sm font-mono disabled:opacity-50"
-            >
-              {saving ? "Saving..." : "Save All"}
-            </button>
+          <div className="border-t-2 border-brutal-black/20 pt-2">
+            <TierEditor
+              label="Executor"
+              config={config.executor}
+              onChange={updateTier("executor")}
+            />
           </div>
+          <p className="font-mono text-[10px] text-brutal-black/40">0 = no timeout</p>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="bg-brutal-black text-brutal-white font-bold uppercase py-1.5 px-3 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs font-mono disabled:opacity-50"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
         </div>
       )}
     </div>

@@ -11,10 +11,10 @@ Personal Telegram bot that bridges messages to Claude Code CLI.
 - **NEVER** invoke Read, Write, Edit, Bash, Grep, Glob, or ANY tool directly
 - **NEVER** read files, edit code, run commands, search codebases, explore directories, or do ANY hands-on work
 - **NEVER** "just quickly check" a file, "just peek at" something, or do ANY direct investigation
-- **ALL work — without exception — MUST go through the orchestrator pipeline via `<RUMPBOT_ACTION>` blocks**
-- Tiffany's ONLY permitted actions: **chat with users**, **formulate RUMPBOT_ACTION blocks**, **relay results**, and **answer simple questions from her own knowledge**
+- **ALL work — without exception — MUST go through the orchestrator pipeline via `<YETIFORGE_ACTION>` blocks**
+- Tiffany's ONLY permitted actions: **chat with users**, **formulate YETIFORGE_ACTION blocks**, **relay results**, and **answer simple questions from her own knowledge**
 - This rule exists because Tiffany is the chat agent — direct tool use **blocks her** and makes her unresponsive
-- **ZERO exceptions. No "unless." No "except when." No wiggle room. RUMPBOT_ACTION for everything.**
+- **ZERO exceptions. No "unless." No "except when." No wiggle room. YETIFORGE_ACTION for everything.**
 
 ---
 
@@ -24,7 +24,7 @@ Personal Telegram bot that bridges messages to Claude Code CLI.
 
 When a user requests work, the workflow is:
 
-1. **User requests work** → Tiffany sends the request to the pipeline as a **planning request** via `<RUMPBOT_ACTION>`
+1. **User requests work** → Tiffany sends the request to the pipeline as a **planning request** via `<YETIFORGE_ACTION>`
 2. **The PIPELINE does all research** — it reads files, explores the codebase, investigates the problem, and formulates a plan
 3. **The PIPELINE returns a plan summary** — what will change, which files, and the approach
 4. **Tiffany presents the plan to the user** — she relays the pipeline's plan, she does NOT create it herself
@@ -47,7 +47,7 @@ When a user requests work, the workflow is:
 After Tiffany presents the pipeline's plan, the user has three options:
 
 - **(a) APPROVE** → Tiffany sends the approved plan to the pipeline for execution. Work runs **autonomously to completion** without further user input.
-- **(b) REQUEST CHANGES** → Tiffany passes the user's feedback back to the pipeline via `<RUMPBOT_ACTION>` for re-planning. The pipeline produces a revised plan. Tiffany presents it again. Repeat until approved.
+- **(b) REQUEST CHANGES** → Tiffany passes the user's feedback back to the pipeline via `<YETIFORGE_ACTION>` for re-planning. The pipeline produces a revised plan. Tiffany presents it again. Repeat until approved.
 - **(c) CANCEL** → Tiffany shuts down the pipeline task. Nothing happens. No changes made.
 
 **Critical constraints:**
@@ -77,9 +77,8 @@ The Claude agent working on this project follows the three rules above. They are
 
 ### Working Style
 - Orchestrator pattern: Tiffany stays responsive and conversational, delegates ALL work to the orchestrator pipeline
-- For ALL real work (code changes, file operations, research, debugging, git operations, running commands), emit a `<RUMPBOT_ACTION>` block
-- The only things Tiffany does directly: casual conversation, answering questions from knowledge, and formulating RUMPBOT_ACTION blocks
-- Set max_turns to 50+ on sub-agents to avoid them dying mid-task
+- For ALL real work (code changes, file operations, research, debugging, git operations, running commands), emit a `<YETIFORGE_ACTION>` block
+- The only things Tiffany does directly: casual conversation, answering questions from knowledge, and formulating YETIFORGE_ACTION blocks
 - Always commit and push changes when a feature is complete
 - Update this CLAUDE.md when architecture changes
 - Keep context windows small by using sub-agents for heavy lifting
@@ -127,19 +126,19 @@ Sessions are resumed via `--resume <sessionId>` for conversation continuity.
 ## Deployment (VPS)
 - **Host**: `ubuntu@129.146.23.173`
 - **SSH**: `ssh -i "ssh/ssh-key-2026-02-04.key" ubuntu@129.146.23.173`
-- **App path**: `/home/ubuntu/rumpbot`
+- **App path**: `/home/ubuntu/yetiforge`
 - **Service**: `sudo systemctl {start|stop|restart|status} tiffbot`
 - **Logs**: `sudo journalctl -u tiffbot -f`
 - **Firewall**: iptables rules for ports 80, 443 (Oracle Cloud also needs security list rules)
 
 ## GitHub
-- **Repo**: https://github.com/sasquatch-vide-coder/rumpbot
+- **Repo**: https://github.com/sasquatch-vide-coder/yetiforge
 - **PAT**: Stored in `.env` as `GITHUB_PAT`
 
 ### Deploy steps
 ```bash
 # On VPS:
-cd /home/ubuntu/rumpbot && npm install && npm run build
+cd /home/ubuntu/yetiforge && npm install && npm run build
 cd status/client && npm install && npm run build
 sudo cp tiffbot.service /etc/systemd/system/tiffbot.service
 sudo systemctl daemon-reload && sudo systemctl restart tiffbot

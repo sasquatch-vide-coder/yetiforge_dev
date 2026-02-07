@@ -8,6 +8,7 @@ import { AdminTelegramPanel } from "../components/AdminTelegramPanel";
 import { AdminSSLPanel } from "../components/AdminSSLPanel";
 import { AdminSecurityPanel } from "../components/AdminSecurityPanel";
 import { AdminAgentPanel } from "../components/AdminAgentPanel";
+import { AdminStallDetectionPanel } from "../components/AdminStallDetectionPanel";
 import { ChatPanel } from "../components/ChatPanel";
 import { AgentsPanel } from "../components/AgentsPanel";
 import { ServiceCard } from "../components/ServiceCard";
@@ -23,10 +24,12 @@ import { AlertsBanner } from "../components/AlertsBanner";
 import { AgentMetricsPanel } from "../components/AgentMetricsPanel";
 import { SystemMetricsChart } from "../components/SystemMetricsChart";
 import { KeyboardShortcutsHelp } from "../components/ui/KeyboardShortcutsHelp";
+import { HelpButton } from "../components/ui/HelpModal";
+import { helpContent } from "../components/ui/helpContent";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { resetChatSession, updateBotConfig } from "../lib/adminApi";
+import { resetChatSession } from "../lib/adminApi";
 
-type Tab = "admin" | "chat" | "agents" | "dashboard" | "costs";
+type Tab = "admin" | "chat" | "agents" | "dashboard";
 
 function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -44,63 +47,40 @@ function relativeTime(dateStr: string): string {
   return `${days} days ago`;
 }
 
-function BotSettingsPanel({ token }: { token: string }) {
-  const { botName, refetch } = useBotName();
-  const [nameInput, setNameInput] = useState(botName);
-  const [saving, setSaving] = useState(false);
-  const [statusMsg, setStatusMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
-
-  const handleSave = async () => {
-    if (!nameInput.trim()) return;
-    setSaving(true);
-    setStatusMsg("");
-    setErrorMsg("");
-    try {
-      await updateBotConfig({ botName: nameInput.trim() }, token);
-      setStatusMsg("Bot name updated successfully.");
-      refetch();
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "Failed to update bot name");
-    } finally {
-      setSaving(false);
-    }
-  };
+/* ── Collapsible Section ── */
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  helpKey,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  helpKey?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const panelHelp = helpKey ? helpContent[helpKey] : undefined;
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <h2 className="text-xl font-bold uppercase mb-4 font-mono">Bot Settings</h2>
-
-      {errorMsg && (
-        <p className="font-mono text-sm text-brutal-red mb-2">{errorMsg}</p>
+    <div className="mb-6">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between bg-brutal-black text-brutal-white px-4 py-3 brutal-border font-bold uppercase text-sm font-mono tracking-widest min-h-[44px] touch-manipulation"
+      >
+        <span>{title}</span>
+        <span className="text-lg leading-none">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="mt-4 relative pb-10">
+          {children}
+          {panelHelp && (
+            <div className="absolute bottom-0 right-0">
+              <HelpButton content={panelHelp} />
+            </div>
+          )}
+        </div>
       )}
-      {statusMsg && (
-        <p className="font-mono text-sm text-brutal-green font-bold mb-2">
-          {statusMsg}
-        </p>
-      )}
-
-      <div>
-        <label className="block text-xs uppercase font-bold font-mono mb-1">
-          Bot Name
-        </label>
-        <input
-          type="text"
-          value={nameInput}
-          onChange={(e) => setNameInput(e.target.value)}
-          className="w-full p-2 brutal-border font-mono text-sm bg-brutal-bg"
-        />
-      </div>
-
-      <div className="mt-4">
-        <button
-          onClick={handleSave}
-          disabled={saving || !nameInput.trim()}
-          className="bg-brutal-black text-brutal-white font-bold uppercase py-2 px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-sm font-mono disabled:opacity-50"
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
-      </div>
     </div>
   );
 }
@@ -120,7 +100,6 @@ export function AdminDashboard() {
     { key: "2", ctrl: true, handler: () => setActiveTab("chat") },
     { key: "3", ctrl: true, handler: () => setActiveTab("agents") },
     { key: "4", ctrl: true, handler: () => setActiveTab("dashboard") },
-    { key: "5", ctrl: true, handler: () => setActiveTab("costs") },
   ]);
 
   const fetchDailyStats = useCallback(async () => {
@@ -175,30 +154,37 @@ export function AdminDashboard() {
 
   if (!token) return null;
 
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "admin", label: "Admin" },
+    { key: "chat", label: "Chat" },
+    { key: "agents", label: "Agents" },
+    { key: "dashboard", label: "Dashboard" },
+  ];
+
   return (
     <div className="min-h-screen bg-brutal-bg p-4 md:p-10 w-full overflow-x-hidden box-border">
-      {/* Header */}
-      <header className="mb-8">
+      {/* Header — compact on mobile */}
+      <header className="mb-4 md:mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight uppercase">
+            <h1 className="text-2xl md:text-5xl font-bold tracking-tight uppercase">
               {botName}
             </h1>
-            <p className="text-sm mt-1 text-brutal-black/60 uppercase tracking-wide">
+            <p className="text-xs md:text-sm mt-1 text-brutal-black/60 uppercase tracking-wide hidden md:block">
               Admin Panel
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <KeyboardShortcutsHelp />
+            <span className="hidden md:inline-block"><KeyboardShortcutsHelp /></span>
             <Link
               to="/"
-              className="bg-brutal-white text-brutal-black font-bold uppercase py-2 px-3 md:px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs md:text-sm font-mono"
+              className="bg-brutal-white text-brutal-black font-bold uppercase py-2 px-3 md:px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs md:text-sm font-mono min-h-[44px] inline-flex items-center touch-manipulation"
             >
               Home
             </Link>
             <button
               onClick={logout}
-              className="bg-brutal-red text-brutal-white font-bold uppercase py-2 px-3 md:px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs md:text-sm font-mono"
+              className="bg-brutal-red text-brutal-white font-bold uppercase py-2 px-3 md:px-4 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs md:text-sm font-mono min-h-[44px] inline-flex items-center touch-manipulation"
             >
               Logout
             </button>
@@ -208,66 +194,30 @@ export function AdminDashboard() {
 
       <AlertsBanner />
 
-      {/* Tab Navigation */}
-      <div className="flex gap-0 mb-6 w-full max-w-full items-center">
-        <button
-          onClick={() => setActiveTab("admin")}
-          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
-            activeTab === "admin"
-              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
-              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
-          }`}
-          style={{ borderRight: activeTab === "admin" ? undefined : "none" }}
-        >
-          Admin
-        </button>
-        <button
-          onClick={() => setActiveTab("chat")}
-          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
-            activeTab === "chat"
-              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
-              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
-          }`}
-          style={{ borderRight: activeTab === "chat" ? undefined : "none" }}
-        >
-          Chat
-        </button>
-        <button
-          onClick={() => setActiveTab("agents")}
-          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
-            activeTab === "agents"
-              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
-              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
-          }`}
-          style={{ borderRight: activeTab === "agents" ? undefined : "none" }}
-        >
-          Agents
-        </button>
-        <button
-          onClick={() => setActiveTab("dashboard")}
-          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
-            activeTab === "dashboard"
-              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
-              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
-          }`}
-          style={{ borderRight: activeTab === "dashboard" ? undefined : "none" }}
-        >
-          Dashboard
-        </button>
-        <button
-          onClick={() => setActiveTab("costs")}
-          className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all ${
-            activeTab === "costs"
-              ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
-              : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
-          }`}
-        >
-          Costs
-        </button>
+      {/* Tab Navigation — horizontally scrollable on mobile */}
+      <div className="flex mb-6 w-full max-w-full items-center overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0 md:overflow-x-visible">
+        <div className="flex gap-0 flex-nowrap">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono transition-all whitespace-nowrap min-h-[44px] touch-manipulation flex-shrink-0 ${
+                activeTab === tab.key
+                  ? "bg-brutal-black text-brutal-white brutal-shadow translate-x-0 translate-y-0"
+                  : "bg-brutal-white text-brutal-black hover:bg-brutal-bg"
+              }`}
+              style={{
+                borderRight: activeTab === tab.key ? undefined : "none",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         {activeTab === "chat" && (
           <button
             onClick={handleReset}
-            className="ml-auto bg-brutal-orange text-brutal-white font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono brutal-shadow hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-none transition-all"
+            className="ml-auto bg-brutal-orange text-brutal-white font-bold uppercase py-2 md:py-3 px-4 md:px-6 brutal-border text-xs md:text-sm font-mono brutal-shadow hover:-translate-x-[2px] hover:-translate-y-[2px] hover:shadow-none transition-all min-h-[44px] touch-manipulation flex-shrink-0"
           >
             New Session
           </button>
@@ -276,17 +226,40 @@ export function AdminDashboard() {
 
       {/* Tab Content */}
       {activeTab === "admin" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <AdminAgentPanel token={token} />
-          <AdminClaudePanel token={token} />
-          <AdminTelegramPanel token={token} />
-          <AdminSSLPanel token={token} />
-          <AdminSecurityPanel token={token} />
-          <BotSettingsPanel token={token} />
-          <SessionsPanel token={token} />
-          <BackupPanel token={token} />
-          <AlertsPanel token={token} />
-          <AuditLogPanel token={token} />
+        <div>
+          {/* Configuration — open by default */}
+          <CollapsibleSection title="Configuration" defaultOpen={true} helpKey="configuration">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <AdminAgentPanel token={token} />
+              <AdminClaudePanel token={token} />
+              <AdminStallDetectionPanel token={token} />
+              <AdminTelegramPanel token={token} />
+            </div>
+          </CollapsibleSection>
+
+          {/* Security */}
+          <CollapsibleSection title="Security" helpKey="security">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <AdminSecurityPanel token={token} />
+              <AdminSSLPanel token={token} />
+              <SessionsPanel token={token} />
+            </div>
+          </CollapsibleSection>
+
+          {/* Monitoring */}
+          <CollapsibleSection title="Monitoring" helpKey="monitoring">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <AlertsPanel token={token} />
+              <AuditLogPanel token={token} />
+            </div>
+          </CollapsibleSection>
+
+          {/* Maintenance */}
+          <CollapsibleSection title="Maintenance" helpKey="maintenance">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <BackupPanel token={token} />
+            </div>
+          </CollapsibleSection>
         </div>
       )}
 
@@ -340,9 +313,8 @@ export function AdminDashboard() {
           {status && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <ServiceCard
-                status={status.service.status}
-                uptime={status.service.uptime}
-                memory={status.service.memory}
+                tiffbot={status.services?.tiffbot || status.service}
+                nginx={status.services?.nginx || { status: "unknown", uptime: null, pid: null, memory: null }}
               />
               <SystemCard
                 serverUptime={status.system.serverUptime}
@@ -356,6 +328,11 @@ export function AdminDashboard() {
               <CostCard invocations={invocations} />
             </div>
           )}
+
+          {/* Agent Metrics (merged from Costs tab) */}
+          <div className="mt-6">
+            <AgentMetricsPanel />
+          </div>
 
           {/* Cost & Token Trend Chart */}
           <div className="mt-6">
@@ -374,21 +351,6 @@ export function AdminDashboard() {
 
           <div className="mt-6 text-center text-xs text-brutal-black/40 uppercase">
             Updated every 3s
-          </div>
-        </div>
-      )}
-
-      {activeTab === "costs" && (
-        <div>
-          <AgentMetricsPanel />
-          <div className="mt-6">
-            <CostCard invocations={invocations} />
-          </div>
-          <div className="mt-6">
-            <CostTokenChart data={dailyStats} loading={dailyStatsLoading} />
-          </div>
-          <div className="mt-6">
-            <ModelBreakdown />
           </div>
         </div>
       )}

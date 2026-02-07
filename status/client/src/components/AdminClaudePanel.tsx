@@ -22,17 +22,9 @@ interface ClaudeStatus {
 }
 
 function decodeRateLimitTier(tier: string): string {
-  // Common patterns: "tier_4_2025_09_29" or similar
-  // Extract meaningful parts
   const cleaned = tier.replace(/_/g, " ").trim();
-
-  // Try to extract tier number pattern like "tier 4"
   const tierMatch = tier.match(/tier[_ ]?(\d+)/i);
-  if (tierMatch) {
-    return `Tier ${tierMatch[1]}`;
-  }
-
-  // Try to extract rate limit numbers
+  if (tierMatch) return `Tier ${tierMatch[1]}`;
   const limitMatch = tier.match(/(\d+)\s*(?:per|\/)\s*(minute|min|hour|hr|day|second|sec)/i);
   if (limitMatch) {
     const units: Record<string, string> = {
@@ -41,14 +33,7 @@ function decodeRateLimitTier(tier: string): string {
     };
     return `${limitMatch[1]} req/${units[limitMatch[2].toLowerCase()] || limitMatch[2]}`;
   }
-
-  // If it's short enough and looks decent after underscore replacement, use it cleaned
-  if (cleaned.length <= 30) {
-    // Capitalize first letter of each word
-    return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  // Fallback: just clean up underscores
+  if (cleaned.length <= 30) return cleaned.replace(/\b\w/g, (c) => c.toUpperCase());
   return cleaned;
 }
 
@@ -63,13 +48,24 @@ function formatExpiry(expiresAt: number): string {
   return `${hours}h ${mins}m`;
 }
 
+function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={`px-1.5 py-0.5 font-bold text-[10px] ${
+        ok ? "bg-brutal-green text-brutal-black" : "bg-brutal-red text-brutal-white"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function AdminClaudePanel({ token }: Props) {
   const [status, setStatus] = useState<ClaudeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showSetup, setShowSetup] = useState(false);
 
-  // Update state
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{
@@ -112,199 +108,149 @@ export function AdminClaudePanel({ token }: Props) {
       const result = await installClaudeUpdate(token);
       setUpdateOutput(result.output);
       setUpdateInfo(null);
-      // Refresh status to get new version
       fetchStatus();
     } catch (e) {
-      setUpdateOutput(
-        e instanceof Error ? e.message : "Failed to install update"
-      );
+      setUpdateOutput(e instanceof Error ? e.message : "Failed to install update");
     } finally {
       setUpdating(false);
     }
   };
 
   return (
-    <div className="bg-brutal-white brutal-border brutal-shadow p-6">
-      <h2 className="text-lg font-bold uppercase mb-4 border-b-3 border-brutal-black pb-2">
-        Claude Code
-      </h2>
+    <div className="bg-brutal-white brutal-border brutal-shadow p-4">
+      <h2 className="text-sm font-bold uppercase mb-2 font-mono">Claude Code</h2>
 
-      {loading && <p className="font-mono text-sm">Checking status...</p>}
-      {error && (
-        <p className="font-mono text-sm text-brutal-red mb-2">{error}</p>
-      )}
+      {loading && <p className="font-mono text-xs">Checking...</p>}
+      {error && <p className="font-mono text-xs text-brutal-red mb-1">{error}</p>}
 
       {status && (
-        <div className="space-y-3 font-mono text-sm">
-          <div className="flex justify-between">
-            <span className="uppercase font-bold">Installed</span>
-            <span
-              className={`px-2 py-0.5 font-bold ${
-                status.installed
-                  ? "bg-brutal-green text-brutal-black"
-                  : "bg-brutal-red text-brutal-white"
-              }`}
-            >
-              {status.installed ? "YES" : "NO"}
-            </span>
+        <div className="space-y-2 font-mono text-xs">
+          {/* Compact status grid: 2 columns of key-value pairs */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            <div className="flex items-center justify-between">
+              <span className="uppercase font-bold text-[10px]">Installed</span>
+              <StatusBadge ok={status.installed} label={status.installed ? "YES" : "NO"} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="uppercase font-bold text-[10px]">Auth</span>
+              <StatusBadge ok={status.authenticated} label={status.authenticated ? "YES" : "NO"} />
+            </div>
+
+            {status.version && (
+              <div className="flex items-center justify-between">
+                <span className="uppercase font-bold text-[10px]">Version</span>
+                <span className="text-[10px]">{status.version}</span>
+              </div>
+            )}
+
+            {status.tokenExpiresAt && (
+              <div className="flex items-center justify-between">
+                <span className="uppercase font-bold text-[10px]">Expires</span>
+                <StatusBadge
+                  ok={status.tokenExpiresAt > Date.now()}
+                  label={formatExpiry(status.tokenExpiresAt)}
+                />
+              </div>
+            )}
+
+            {status.subscriptionType && (
+              <div className="flex items-center justify-between">
+                <span className="uppercase font-bold text-[10px]">Plan</span>
+                <span className="px-1.5 py-0.5 font-bold text-[10px] bg-brutal-purple text-brutal-white uppercase">
+                  {status.subscriptionType}
+                </span>
+              </div>
+            )}
+
+            {status.rateLimitTier && (
+              <div className="flex items-center justify-between">
+                <span className="uppercase font-bold text-[10px]">Rate</span>
+                <span className="text-[10px] px-1.5 py-0.5 font-bold bg-brutal-blue/20">
+                  {decodeRateLimitTier(status.rateLimitTier)}
+                </span>
+              </div>
+            )}
           </div>
-
-          {status.version && (
-            <div className="flex justify-between">
-              <span className="uppercase font-bold">Version</span>
-              <span>{status.version}</span>
-            </div>
-          )}
-
-          <div className="flex justify-between">
-            <span className="uppercase font-bold">Authenticated</span>
-            <span
-              className={`px-2 py-0.5 font-bold ${
-                status.authenticated
-                  ? "bg-brutal-green text-brutal-black"
-                  : "bg-brutal-red text-brutal-white"
-              }`}
-            >
-              {status.authenticated ? "YES" : "NO"}
-            </span>
-          </div>
-
-          {status.tokenExpiresAt && (
-            <div className="flex justify-between">
-              <span className="uppercase font-bold">Token Expires</span>
-              <span
-                className={`px-2 py-0.5 font-bold ${
-                  status.tokenExpiresAt > Date.now()
-                    ? "bg-brutal-green text-brutal-black"
-                    : "bg-brutal-red text-brutal-white"
-                }`}
-              >
-                {formatExpiry(status.tokenExpiresAt)}
-              </span>
-            </div>
-          )}
-
-          {status.subscriptionType && (
-            <div className="flex justify-between">
-              <span className="uppercase font-bold">Plan</span>
-              <span className="px-2 py-0.5 font-bold bg-brutal-purple text-brutal-white uppercase">
-                {status.subscriptionType}
-              </span>
-            </div>
-          )}
-
-          {status.rateLimitTier && (
-            <div className="flex justify-between">
-              <span className="uppercase font-bold">Rate Limit</span>
-              <span className="text-xs px-2 py-0.5 font-bold bg-brutal-blue/20">
-                {decodeRateLimitTier(status.rateLimitTier)}
-              </span>
-            </div>
-          )}
 
           {status.path && (
-            <div className="flex justify-between">
+            <div className="flex items-center justify-between text-[10px] text-brutal-black/50">
               <span className="uppercase font-bold">Path</span>
-              <span className="text-xs">{status.path}</span>
+              <span className="truncate ml-2">{status.path}</span>
             </div>
           )}
 
-          {/* Updates Section */}
-          <div className="border-t-3 border-brutal-black pt-3 mt-4">
-            <h3 className="font-bold uppercase text-xs mb-2">Updates</h3>
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleCheckUpdate}
-                disabled={checking || updating}
-                className="flex-1 bg-brutal-blue text-brutal-white font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-xs"
-              >
-                {checking ? "Checking..." : "Check for Updates"}
-              </button>
-            </div>
-
-            {updateInfo && (
-              <div className="mt-2">
-                {updateInfo.upToDate ? (
-                  <p className="text-brutal-green font-bold text-xs">
-                    Up to date!
-                  </p>
-                ) : updateInfo.updateAvailable ? (
-                  <div className="space-y-2">
-                    <p className="text-brutal-orange font-bold text-xs">
-                      Update available!
-                    </p>
-                    <button
-                      onClick={handleInstallUpdate}
-                      disabled={updating}
-                      className="w-full bg-brutal-green text-brutal-black font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-xs"
-                    >
-                      {updating ? "Installing..." : "Install Update"}
-                    </button>
-                  </div>
-                ) : null}
-                <pre className="mt-2 bg-brutal-black text-brutal-green p-2 text-xs overflow-x-auto brutal-border max-h-32 overflow-y-auto">
-                  {updateInfo.output}
-                </pre>
-              </div>
-            )}
-
-            {updateOutput && (
-              <pre className="mt-2 bg-brutal-black text-brutal-green p-2 text-xs overflow-x-auto brutal-border max-h-32 overflow-y-auto">
-                {updateOutput}
-              </pre>
-            )}
-          </div>
-
-          {/* Auth Section */}
-          <div className="border-t-3 border-brutal-black pt-3">
-            <h3 className="font-bold uppercase text-xs mb-2">
-              Authentication
-            </h3>
-
+          {/* Updates + Auth: compact row of buttons */}
+          <div className="border-t-2 border-brutal-black/20 pt-2 mt-1 flex gap-2">
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checking || updating}
+              className="flex-1 bg-brutal-blue text-brutal-white font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-[10px]"
+            >
+              {checking ? "Checking..." : "Check Updates"}
+            </button>
             <button
               onClick={() => setShowSetup(!showSetup)}
-              className="w-full bg-brutal-yellow text-brutal-black font-bold uppercase py-2 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-xs"
+              className="flex-1 bg-brutal-yellow text-brutal-black font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all text-[10px]"
             >
-              {showSetup
-                ? "Hide"
-                : status.authenticated
-                  ? "Re-Authenticate"
-                  : "Setup Authentication"}
+              {showSetup ? "Hide" : status.authenticated ? "Re-Auth" : "Setup Auth"}
             </button>
-
-            {showSetup && (
-              <div className="mt-3 bg-brutal-bg brutal-border p-4 space-y-3">
-                <p className="font-bold uppercase text-xs">
-                  {status.authenticated
-                    ? "To re-authenticate or refresh your token:"
-                    : "To authenticate Claude Code:"}
-                </p>
-                <div className="space-y-2 text-xs">
-                  <p>1. SSH into your server:</p>
-                  <pre className="bg-brutal-black text-brutal-green p-2 brutal-border overflow-x-auto">
-                    ssh ubuntu@your-server-ip
-                  </pre>
-                  <p>2. Run the authentication command:</p>
-                  <pre className="bg-brutal-black text-brutal-green p-2 brutal-border overflow-x-auto">
-                    {status.setupCommand}
-                  </pre>
-                  <p>
-                    3. A browser will open — sign in with your Anthropic
-                    account.
-                  </p>
-                  <p>4. Restart the bot service to apply:</p>
-                  <pre className="bg-brutal-black text-brutal-green p-2 brutal-border overflow-x-auto">
-                    sudo systemctl restart rumpbot
-                  </pre>
-                  <p className="text-brutal-black/60 italic">
-                    Authentication requires browser access via SSH and cannot be
-                    done through this web interface.
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
+
+          {/* Update results */}
+          {updateInfo && (
+            <div>
+              {updateInfo.upToDate ? (
+                <p className="text-brutal-green font-bold text-[10px]">Up to date!</p>
+              ) : updateInfo.updateAvailable ? (
+                <div className="space-y-1">
+                  <p className="text-brutal-orange font-bold text-[10px]">Update available!</p>
+                  <button
+                    onClick={handleInstallUpdate}
+                    disabled={updating}
+                    className="w-full bg-brutal-green text-brutal-black font-bold uppercase py-1.5 brutal-border hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none brutal-shadow transition-all disabled:opacity-50 text-[10px]"
+                  >
+                    {updating ? "Installing..." : "Install Update"}
+                  </button>
+                </div>
+              ) : null}
+              <pre className="mt-1 bg-brutal-black text-brutal-green p-1.5 text-[10px] overflow-x-auto brutal-border max-h-20 overflow-y-auto leading-tight">
+                {updateInfo.output}
+              </pre>
+            </div>
+          )}
+
+          {updateOutput && (
+            <pre className="bg-brutal-black text-brutal-green p-1.5 text-[10px] overflow-x-auto brutal-border max-h-20 overflow-y-auto leading-tight">
+              {updateOutput}
+            </pre>
+          )}
+
+          {/* Auth setup (expandable) */}
+          {showSetup && (
+            <div className="bg-brutal-bg brutal-border p-3 space-y-2 text-[10px]">
+              <p className="font-bold uppercase">
+                {status.authenticated ? "To re-authenticate:" : "To authenticate Claude Code:"}
+              </p>
+              <div className="space-y-1">
+                <p>1. SSH into your server:</p>
+                <pre className="bg-brutal-black text-brutal-green p-1.5 brutal-border overflow-x-auto">
+                  ssh ubuntu@your-server-ip
+                </pre>
+                <p>2. Run auth command:</p>
+                <pre className="bg-brutal-black text-brutal-green p-1.5 brutal-border overflow-x-auto">
+                  {status.setupCommand}
+                </pre>
+                <p>3. Sign in via browser.</p>
+                <p>4. Restart service:</p>
+                <pre className="bg-brutal-black text-brutal-green p-1.5 brutal-border overflow-x-auto">
+                  sudo systemctl restart tiffbot
+                </pre>
+                <p className="text-brutal-black/60 italic">
+                  Requires browser access via SSH.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

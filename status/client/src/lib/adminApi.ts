@@ -1,6 +1,6 @@
 const API_BASE = "/api/admin";
 
-const TOKEN_KEY = "rumpbot_admin_token";
+const TOKEN_KEY = "yetiforge_admin_token";
 
 async function request<T = Record<string, unknown>>(
   path: string,
@@ -187,11 +187,32 @@ export function changePassword(
   });
 }
 
+// Username
+export function getUsername(token: string) {
+  return request<{ username: string }>("/username", { token });
+}
+
+export function changeUsername(newUsername: string, token: string) {
+  return request<{ ok: boolean; username: string }>("/change-username", {
+    method: "POST",
+    body: JSON.stringify({ newUsername }),
+    token,
+  });
+}
+
 // Agent Config
+export interface StallThresholds {
+  trivialMs: number;
+  moderateMs: number;
+  complexMs: number;
+}
+
 export interface AgentTierConfig {
   model: string;
-  maxTurns: number;
   timeoutMs: number;
+  stallWarning?: StallThresholds;
+  stallKill?: StallThresholds;
+  stallGraceMultiplier?: number;
 }
 
 export interface AgentConfigData {
@@ -303,14 +324,6 @@ export function sendChatMessage(
 // Bot Config
 export function getBotConfig(token: string) {
   return request<{ botName: string }>("/bot/config", { token });
-}
-
-export function updateBotConfig(config: { botName: string }, token: string) {
-  return request<{ ok: boolean; botName: string }>("/bot/config", {
-    method: "POST",
-    body: JSON.stringify(config),
-    token,
-  });
 }
 
 export function resetChatSession(token: string) {

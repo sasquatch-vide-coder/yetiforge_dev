@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { logger } from "../utils/logger.js";
 
-export type AgentPhase = "executing" | "completed" | "failed";
+export type AgentPhase = "planning" | "executing" | "completed" | "failed";
 export type AgentRole = "executor";
 
 export interface AgentEntry {

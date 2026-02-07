@@ -1,15 +1,19 @@
 [Unit]
-Description=TIFFBOT Telegram Bot
+Description=YetiForge AI Bot Framework
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/rumpbot
-ExecStart=/usr/bin/node dist/index.js
+User=__USER__
+WorkingDirectory=__WORKDIR__
+ExecStart=__NODE_PATH__ dist/index.js
 Restart=always
 RestartSec=10
-EnvironmentFile=/home/ubuntu/rumpbot/.env
+EnvironmentFile=__WORKDIR__/.env
+
+# Security hardening
+NoNewPrivileges=true
 
 # Logging
 StandardOutput=journal

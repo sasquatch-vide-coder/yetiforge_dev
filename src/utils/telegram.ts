@@ -80,3 +80,38 @@ export async function editMessage(
     }
   }
 }
+
+/**
+ * Safe edit that tracks last-sent text to avoid "message is not modified" errors.
+ * Returns true if the edit was sent, false if skipped (identical text or error).
+ */
+export async function safeEditMessage(
+  ctx: Context,
+  messageId: number,
+  text: string,
+  lastText: { value: string },
+): Promise<boolean> {
+  // Skip if text hasn't changed
+  if (text === lastText.value) return false;
+
+  // Telegram max message length
+  const truncated = text.length > 4096 ? text.slice(0, 4093) + "..." : text;
+
+  try {
+    await ctx.api.editMessageText(ctx.chat!.id, messageId, truncated, {
+      parse_mode: "Markdown",
+    });
+    lastText.value = text;
+    return true;
+  } catch {
+    // Markdown failed, try plain text
+    try {
+      await ctx.api.editMessageText(ctx.chat!.id, messageId, truncated);
+      lastText.value = text;
+      return true;
+    } catch {
+      // Silently ignore (identical text, message deleted, etc.)
+      return false;
+    }
+  }
+}

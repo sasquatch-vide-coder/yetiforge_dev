@@ -1,4 +1,4 @@
-# TIFFBOT 🤖
+# YETIFORGE 🤖
 
 A personal AI assistant that lives in Telegram, powered by Claude Code CLI and a three-tier agent architecture. She's snarky, she's opinionated, and she gets the job done — whether you asked nicely or not.
 
